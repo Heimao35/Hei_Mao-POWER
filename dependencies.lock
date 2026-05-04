@@ -1,0 +1,24 @@
+dependencies:
+  espressif/cmake_utilities:
+    dependencies: []
+    source:
+      path: F:\PROJECT\AMOLED\Opal\components\espressif__cmake_utilities
+      type: local
+    version: 0.5.3
+  espressif/esp_lcd_touch:
+    dependencies: []
+    source:
+      path: F:\PROJECT\AMOLED\Opal\components\espressif__esp_lcd_touch
+      type: local
+    version: 1.1.1
+  idf:
+    source:
+      type: idf
+    version: 5.4.3
+direct_dependencies:
+- espressif/cmake_utilities
+- espressif/esp_lcd_touch
+- idf
+manifest_hash: 9aa5bd31ffa0f36dce8f738fe4a1d4f174534af0173e2bb862fd11b815c0def0
+target: esp32s3
+version: 2.0.0

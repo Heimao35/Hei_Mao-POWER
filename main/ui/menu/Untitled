@@ -1,0 +1,10 @@
+F:/PROJECT/ESP32_TERMINAL/code/Opal/main/main.c:14:10: fatal error: lvgl.h: No such file or directory  
+   14 | #include "lvgl.h"
+      |          ^~~~~~~~
+compilation terminated.
+[18/26] Performing build step for 'bootloader'
+[1/1] C:\Windows\system32\cmd.exe /C "cd /D F:\PROJECT\ESP32_TERMINAL\code\Opal\build\bootloader\esp-idf\esptool_py && C:\Users\Administrator\.espressif\python_env\idf5.4_py3.11_env\Scripts\python.exe "D:/ban gong/espidf/v5.4.3/esp-idf/components/partition_table/check_sizes.py" --offset 0x8000 bootloader 0x0 F:/PROJECT/ESP32_TERMINAL/code/Opal/build/bootloader/bootloader.bin"
+Bootloader binary size 0x5cb0 bytes. 0x2350 bytes (28%) free.
+ninja: build stopped: subcommand failed.
+
+ *  终端进程“C:\Users\Administrator\.espressif\tools\ninja\1.12.1\ninja.EXE”已终止，退出代码: 1。
