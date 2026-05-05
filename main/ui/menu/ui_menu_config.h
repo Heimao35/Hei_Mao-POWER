@@ -13,13 +13,13 @@ extern "C" {
 #define UI_MENU_WHEEL_COL_WIDTH   280
 
 /** Fixed row height for each menu entry (snapping unit). */
-#define UI_MENU_WHEEL_ROW_HEIGHT  56
+#define UI_MENU_WHEEL_ROW_HEIGHT  60
 
 /** Vertical gap between rows (flex pad_row). */
 #define UI_MENU_WHEEL_ROW_GAP     10
 
-/** Distance (px) from wheel center: drives font tier + color (no transform_zoom; stable on ESP). */
-#define UI_MENU_ZOOM_RANGE_PX     140
+/** Row center within this distance (px) of snap line = highlight; else dim. */
+#define UI_MENU_WHEEL_HIGHLIGHT_PX  36
 
 /**
  * Extra scroll content padding at top/bottom for submenu wheels (header is floating over full-screen scroll).

@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "Opal",
-    "project_version":    "0d91018-dirty",
+    "project_version":    "db30964-dirty",
     "project_path":       "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL",
     "idf_path":           "D:/ban gong/espidf/v5.4.3/esp-idf",
     "build_dir":          "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build",

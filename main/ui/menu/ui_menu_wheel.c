@@ -13,47 +13,19 @@ struct ui_menu_wheel {
 
 static void wheel_apply_row_style(lv_obj_t *row, lv_coord_t dist_from_center)
 {
-    if (dist_from_center < 0) {
-        dist_from_center = 0;
-    }
-    if (dist_from_center > UI_MENU_ZOOM_RANGE_PX) {
-        dist_from_center = UI_MENU_ZOOM_RANGE_PX;
-    }
-
-    /*
-     * Do not use transform_zoom on text: on ESP32 + SW blend it often invalidates wrong
-     * regions so glyphs only flash while scrolling. Emphasize with font tier + color instead.
-     */
-    static const lv_font_t *const k_tier_fonts[] = {
-        &lv_font_montserrat_18,
-        &lv_font_montserrat_20,
-        &lv_font_montserrat_22,
-        &lv_font_montserrat_24,
-        &lv_font_montserrat_28,
-    };
+    const lv_coord_t d = dist_from_center < 0 ? 0 : dist_from_center;
+    const bool       hi = d <= UI_MENU_WHEEL_HIGHLIGHT_PX;
 
     lv_obj_t *lbl = lv_obj_get_child(row, 0);
     if (lbl) {
-        lv_obj_set_style_transform_zoom(lbl, 256, LV_PART_MAIN);
-
-        uint32_t fi = (uint32_t)lv_map(dist_from_center, 0, UI_MENU_ZOOM_RANGE_PX, 4, 0);
-        if (fi > 4U) {
-            fi = 4U;
-        }
-        lv_obj_set_style_text_font(lbl, k_tier_fonts[fi], LV_PART_MAIN);
-
-        /* lv_color_mix(c1,c2,mix): mix=0 -> c2, mix=255 -> c1 — center needs bright (hi), so invert mix. */
-        const uint32_t mix = (uint32_t)lv_map(dist_from_center, 0, UI_MENU_ZOOM_RANGE_PX, 0, 255);
-        const lv_color_t hi = lv_color_hex(0x5EEAD4);
-        const lv_color_t lo = lv_color_hex(0x64748B);
-        lv_obj_set_style_text_color(lbl, lv_color_mix(hi, lo, (uint8_t)(255 - mix)), LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_26, LV_PART_MAIN);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(hi ? 0x5EEAD4 : 0x64748B), LV_PART_MAIN);
         lv_obj_set_style_text_opa(lbl, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_invalidate(lbl);
     }
 
-    const lv_opa_t bg_opa = (lv_opa_t)lv_map(dist_from_center, 0, UI_MENU_ZOOM_RANGE_PX, LV_OPA_40, LV_OPA_TRANSP);
     lv_obj_set_style_bg_color(row, lv_color_hex(0x334155), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(row, bg_opa, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(row, hi ? LV_OPA_40 : LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_invalidate(row);
 }
 
@@ -175,7 +147,7 @@ ui_menu_wheel_t *ui_menu_wheel_create(lv_obj_t *parent, const char *const *items
         lv_obj_t *lbl = lv_label_create(row);
         lv_obj_add_flag(lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
         lv_label_set_text(lbl, items[i]);
-        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_22, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, &lv_font_montserrat_26, LV_PART_MAIN);
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_CLIP);
         lv_obj_set_width(lbl, UI_MENU_WHEEL_COL_WIDTH - 40);
         lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 6, 0);
