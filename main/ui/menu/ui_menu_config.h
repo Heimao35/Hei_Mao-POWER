@@ -30,6 +30,15 @@ extern "C" {
 /** Slide transition duration (ms). */
 #define UI_MENU_SLIDE_MS          320
 
+/** Boot intro: main menu wheel slides in from the left (px). */
+#define UI_MENU_BOOT_WHEEL_SLIDE_PX  200
+/** Boot intro: clock root slides in from the right (px). */
+#define UI_MENU_BOOT_CLOCK_SLIDE_PX  180
+/** Boot intro: status strip slides down from above (px). */
+#define UI_MENU_BOOT_STATUS_SLIDE_PX 56
+/** Boot intro duration (ms); wheel, clock, and status run in parallel. */
+#define UI_MENU_BOOT_ANIM_MS         480
+
 /** Minimum horizontal drag (px) to trigger "back" on submenu. */
 #define UI_MENU_BACK_SWIPE_MIN_PX 50
 

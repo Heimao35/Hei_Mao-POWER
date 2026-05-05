@@ -918,7 +918,7 @@
     "LV_COLOR_DEPTH_32": false,
     "LV_COLOR_DEPTH_8": false,
     "LV_COLOR_MIX_ROUND_OFS": 128,
-    "LV_COLOR_SCREEN_TRANSP": false,
+    "LV_COLOR_SCREEN_TRANSP": true,
     "LV_CONF_MINIMAL": true,
     "LV_CONF_SKIP": true,
     "LV_DEMO_BENCHMARK_RGB565A8": false,

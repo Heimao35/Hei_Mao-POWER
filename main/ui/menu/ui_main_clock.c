@@ -6,6 +6,7 @@
  * when the shown slot index increases, strip Y moves downward (ease-out).
  */
 #include "ui_main_clock.h"
+#include "ui_menu_config.h"
 #include "app_time.h"
 
 #include "lvgl.h"
@@ -96,6 +97,11 @@ static void roll_digit_sync_shown_from_geometry(roll_digit_t *r)
 static void anim_strip_y(void *var, int32_t v)
 {
     lv_obj_set_y((lv_obj_t *)var, (lv_coord_t)v);
+}
+
+static void boot_root_set_x_cb(void *var, int32_t v)
+{
+    lv_obj_set_x((lv_obj_t *)var, (lv_coord_t)v);
 }
 
 static void roll_anim_ready_cb(lv_anim_t *anim)
@@ -318,4 +324,30 @@ void ui_main_clock_create(lv_obj_t *main_panel)
     if (s_clk.tick) {
         lv_timer_set_repeat_count(s_clk.tick, -1);
     }
+}
+
+void ui_main_clock_boot_slide_in(void)
+{
+    if (!s_clk.root || !lv_obj_is_valid(s_clk.root)) {
+        return;
+    }
+
+    lv_obj_update_layout(s_clk.root);
+    /*
+     * Must use style X (lv_obj_get_x_aligned), not lv_obj_get_x(): for LV_ALIGN_TOP_RIGHT,
+     * lv_obj_get_x() is the laid-out coordinate while lv_obj_set_x() writes LV_STYLE_X.
+     * Mixing them doubles the TOP_RIGHT (pw - w) offset and moves the clock off-screen.
+     */
+    const lv_coord_t x_target = lv_obj_get_x_aligned(s_clk.root);
+    const lv_coord_t x_from = x_target + UI_MENU_BOOT_CLOCK_SLIDE_PX;
+    lv_obj_set_x(s_clk.root, x_from);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_clk.root);
+    lv_anim_set_exec_cb(&a, boot_root_set_x_cb);
+    lv_anim_set_values(&a, x_from, x_target);
+    lv_anim_set_time(&a, UI_MENU_BOOT_ANIM_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
 }

@@ -17,6 +17,9 @@ void ui_status_bar_init(lv_obj_t *screen);
 /** Refresh Wi-Fi icon from current STA IP state (e.g. after UI-driven connect). */
 void ui_status_bar_sync_wifi(void);
 
+/** Slide status strip from above into place (call after @ref ui_status_bar_init and layout). */
+void ui_status_bar_boot_slide_in(void);
+
 #ifdef __cplusplus
 }
 #endif

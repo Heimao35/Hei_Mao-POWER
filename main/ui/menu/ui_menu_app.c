@@ -56,6 +56,37 @@ static void anim_set_x_cb(void *var, int32_t v)
     lv_obj_set_x((lv_obj_t *)var, v);
 }
 
+static void boot_intro_run(void)
+{
+    lv_obj_t *scr = s_ctx.screen;
+    if (scr) {
+        lv_obj_update_layout(scr);
+    }
+
+    ui_menu_wheel_t *mw = s_ctx.wheels[0];
+    if (mw) {
+        lv_obj_t *wh = ui_menu_wheel_get_root(mw);
+        if (wh && lv_obj_is_valid(wh)) {
+            lv_obj_update_layout(wh);
+            const lv_coord_t x_target = lv_obj_get_x_aligned(wh);
+            const lv_coord_t x_from   = x_target - UI_MENU_BOOT_WHEEL_SLIDE_PX;
+            lv_obj_set_x(wh, x_from);
+
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, wh);
+            lv_anim_set_exec_cb(&a, anim_set_x_cb);
+            lv_anim_set_values(&a, x_from, x_target);
+            lv_anim_set_time(&a, UI_MENU_BOOT_ANIM_MS);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+            lv_anim_start(&a);
+        }
+    }
+
+    ui_main_clock_boot_slide_in();
+    ui_status_bar_boot_slide_in();
+}
+
 static void slide_anim_ready(lv_anim_t *a)
 {
     slide_sync_t *s = (slide_sync_t *)a->user_data;
@@ -410,4 +441,6 @@ void ui_menu_app_init(void)
     lv_disp_load_scr(scr);
     /* Clock after active screen: layout coords and z-order refresh reliably. */
     ui_main_clock_create(main_p);
+
+    boot_intro_run();
 }

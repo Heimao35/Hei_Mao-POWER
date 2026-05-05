@@ -2,6 +2,7 @@
  * @file ui_status_bar.c
  */
 #include "ui_status_bar.h"
+#include "ui_menu_config.h"
 #include "axp2101_battery.h"
 #include "net_wifi.h"
 
@@ -16,17 +17,17 @@
 
 #define UI_STATUS_STRIP_Y        8
 /** Extra inset from screen right edge — larger = whole strip (Wi‑Fi + %) moves left, avoids corner overlap. */
-#define UI_STATUS_EDGE_PAD       24
+#define UI_STATUS_EDGE_PAD       28
 #define UI_STATUS_COL_GAP        10
 #define BAT_TIMER_FIRST_MS       800
 #define BAT_TIMER_PERIOD_MS      30000
-#define BAT_BODY_W               28
-#define BAT_BODY_H               15
-#define BAT_INNER_PAD            3
-#define BAT_ROOT_W               (BAT_BODY_W + 10)
-#define BAT_ROOT_H               (BAT_BODY_H + 4)
-#define BAT_TIP_W                4
-#define BAT_TIP_H                9
+#define BAT_BODY_W               36
+#define BAT_BODY_H               19
+#define BAT_INNER_PAD            4
+#define BAT_ROOT_W               (BAT_BODY_W + 14)
+#define BAT_ROOT_H               (BAT_BODY_H + 6)
+#define BAT_TIP_W                5
+#define BAT_TIP_H                12
 
 static lv_obj_t *s_strip;
 static lv_obj_t *s_wifi_lbl;
@@ -38,6 +39,11 @@ static lv_obj_t *s_chg_lbl;
 static lv_timer_t *s_bat_timer;
 static bool        s_bat_first_period = true;
 static bool        s_events_registered;
+
+static void boot_anim_set_y_cb(void *var, int32_t v)
+{
+    lv_obj_set_y((lv_obj_t *)var, (lv_coord_t)v);
+}
 
 typedef struct {
     bool show;
@@ -60,8 +66,8 @@ static void apply_power_readings(void *p)
 
         const int inner = BAT_BODY_W - 2 * BAT_INNER_PAD;
         int         fw    = (int)soc * inner / 100;
-        if (soc > 0 && fw < 3) {
-            fw = 3;
+        if (soc > 0 && fw < 4) {
+            fw = 4;
         }
         if (fw > inner) {
             fw = inner;
@@ -149,6 +155,28 @@ void ui_status_bar_sync_wifi(void)
     post_wifi_visible(net_wifi_sta_has_ip());
 }
 
+void ui_status_bar_boot_slide_in(void)
+{
+    if (!s_strip || !lv_obj_is_valid(s_strip)) {
+        return;
+    }
+
+    lv_obj_update_layout(s_strip);
+    /* Same as clock: animate LV_STYLE_Y via aligned getter, not lv_obj_get_y() coords. */
+    const lv_coord_t y_target = lv_obj_get_y_aligned(s_strip);
+    const lv_coord_t y_from = y_target - UI_MENU_BOOT_STATUS_SLIDE_PX;
+    lv_obj_set_y(s_strip, y_from);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_strip);
+    lv_anim_set_exec_cb(&a, boot_anim_set_y_cb);
+    lv_anim_set_values(&a, y_from, y_target);
+    lv_anim_set_time(&a, UI_MENU_BOOT_ANIM_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
 void ui_status_bar_init(lv_obj_t *screen)
 {
     if (!screen) {
@@ -194,7 +222,7 @@ void ui_status_bar_init(lv_obj_t *screen)
     s_bat_body = lv_obj_create(s_bat_root);
     lv_obj_clear_flag(s_bat_body, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(s_bat_body, BAT_BODY_W, BAT_BODY_H);
-    lv_obj_set_style_radius(s_bat_body, 4, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_bat_body, 5, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_bat_body, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_color(s_bat_body, lv_color_hex(0x94A3B8), LV_PART_MAIN);
     lv_obj_set_style_border_width(s_bat_body, 2, LV_PART_MAIN);
@@ -206,7 +234,7 @@ void ui_status_bar_init(lv_obj_t *screen)
     lv_obj_set_style_bg_color(s_bat_fill, lv_color_hex(0x64748B), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_bat_fill, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_bat_fill, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(s_bat_fill, 3, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_bat_fill, 4, LV_PART_MAIN);
     lv_obj_set_height(s_bat_fill, BAT_BODY_H - 2 * BAT_INNER_PAD);
     lv_obj_set_width(s_bat_fill, 0);
     lv_obj_align(s_bat_fill, LV_ALIGN_LEFT_MID, BAT_INNER_PAD, 0);
@@ -226,6 +254,13 @@ void ui_status_bar_init(lv_obj_t *screen)
     lv_obj_set_style_text_color(s_chg_lbl, lv_color_hex(0xFBBF24), LV_PART_MAIN);
     lv_obj_set_style_text_font(s_chg_lbl, &lv_font_montserrat_18, LV_PART_MAIN);
     lv_obj_center(s_chg_lbl);
+    lv_obj_update_layout(s_chg_lbl);
+    lv_coord_t chgw = lv_obj_get_width(s_chg_lbl);
+    lv_coord_t chgh = lv_obj_get_height(s_chg_lbl);
+    lv_obj_set_style_transform_pivot_x(s_chg_lbl, chgw / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(s_chg_lbl, chgh / 2, LV_PART_MAIN);
+    /* LVGL: angle in 0.1° units — lay lightning bolt horizontal */
+    lv_obj_set_style_transform_angle(s_chg_lbl, 900, LV_PART_MAIN);
     lv_obj_add_flag(s_chg_lbl, LV_OBJ_FLAG_HIDDEN);
 
     if (!s_events_registered) {

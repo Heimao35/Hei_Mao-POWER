@@ -14,6 +14,9 @@ extern "C" {
 /** Create clock on @p main_panel so it slides with the main menu. */
 void ui_main_clock_create(lv_obj_t *main_panel);
 
+/** Slide clock in from the right (after @ref ui_main_clock_create and layout). */
+void ui_main_clock_boot_slide_in(void);
+
 #ifdef __cplusplus
 }
 #endif
