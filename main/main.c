@@ -20,8 +20,10 @@
 #include "ui/menu/ui_menu_app.h"
 #include "net_wifi.h"
 #include "app_time.h"
+#include "rtc_pcf85063.h"
 #include "display_brightness.h"
-#include "pmic_axp.h"
+#include "i2c_bus_share.h"
+#include "axp2101_battery.h"
 #include "led_rgb.h"
 
 static const char *TAG = "example";
@@ -47,6 +49,8 @@ esp_lcd_touch_handle_t tp = NULL;
 #define AMOLED_D2         (GPIO_NUM_11)
 #define AMOLED_D3         (GPIO_NUM_12)
 #define AMOLED_PWREN      (GPIO_NUM_13)
+#define RTC_INT_GPIO      (GPIO_NUM_45)
+#define AXP_IRQ_GPIO      (GPIO_NUM_21)
 
 /* Shorter strip + internal DMA only: SPI panel_io rejects PSRAM source; smaller buffers help dual DMA fit with Wi-Fi. */
 #define EXAMPLE_LVGL_BUF_HEIGHT        (EXAMPLE_LCD_V_RES / 8)
@@ -280,6 +284,13 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(i2c_param_config(TOUCH_HOST, &i2c_conf));
     ESP_ERROR_CHECK(i2c_driver_install(TOUCH_HOST, i2c_conf.mode, 0, 0, 0));
+    i2c_bus_share_init();
+    if (rtc_pcf85063_init(TOUCH_HOST, RTC_INT_GPIO) != ESP_OK) {
+        ESP_LOGW(TAG, "PCF85063 RTC not available; clock uses SNTP only when online");
+    }
+    if (axp2101_battery_init(TOUCH_HOST, AXP_IRQ_GPIO) != ESP_OK) {
+        ESP_LOGW(TAG, "AXP2101 PMIC not detected; battery UI will show --");
+    }
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     const esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_CST820_CONFIG();
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)TOUCH_HOST, &tp_io_config, &tp_io_handle));
@@ -352,7 +363,6 @@ void app_main(void)
     net_wifi_start_saved_reconnect_background();
 
     xTaskCreate(example_lvgl_port_task, "LVGL", EXAMPLE_LVGL_TASK_STACK_SIZE, NULL, EXAMPLE_LVGL_TASK_PRIORITY, NULL);
-    //xTaskCreate(PMIC_GetBatteryLevel, "PMIC", EXAMPLE_LVGL_TASK_STACK_SIZE, NULL, 1, NULL);
 
     ESP_LOGI(TAG, "Display UI");
     if (example_lvgl_lock(-1)) 

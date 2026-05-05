@@ -11,6 +11,9 @@ file(GLOB_RECURSE srcs *.c
 list(APPEND srcs "ui/menu/ui_status_bar.c")
 list(APPEND srcs "ui/menu/ui_main_clock.c")
 list(APPEND srcs "app_time.c")
+list(APPEND srcs "rtc_pcf85063.c")
+list(APPEND srcs "i2c_bus_share.c")
+list(APPEND srcs "axp2101_battery.c")
 list(REMOVE_DUPLICATES srcs)
 
 set(include_dirs 

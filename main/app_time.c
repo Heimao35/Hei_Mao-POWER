@@ -14,15 +14,20 @@
 
 static const char *TAG = "app_time";
 
-static app_time_rtc_read_fn s_rtc_read;
-static bool                 s_sntp_started;
-static bool                 s_wall_synced;
+static app_time_rtc_read_fn  s_rtc_read;
+static app_time_wall_sync_fn s_wall_sync_hook;
+static app_time_net_lost_fn  s_net_lost_hook;
+static bool                  s_sntp_started;
+static bool                  s_wall_synced;
 
 static void sync_notification_cb(struct timeval *tv)
 {
     (void)tv;
     s_wall_synced = true;
     ESP_LOGI(TAG, "SNTP time sync OK");
+    if (s_wall_sync_hook) {
+        s_wall_sync_hook();
+    }
 }
 
 static void start_sntp(void)
@@ -46,6 +51,9 @@ static void stop_sntp(void)
     esp_sntp_stop();
     s_sntp_started = false;
     s_wall_synced = false;
+    if (s_net_lost_hook) {
+        s_net_lost_hook();
+    }
     ESP_LOGI(TAG, "SNTP stopped (STA lost)");
 }
 
@@ -97,6 +105,16 @@ void app_time_register_rtc_reader(app_time_rtc_read_fn fn)
     s_rtc_read = fn;
 }
 
+void app_time_register_wall_sync_handler(app_time_wall_sync_fn fn)
+{
+    s_wall_sync_hook = fn;
+}
+
+void app_time_register_net_lost_handler(app_time_net_lost_fn fn)
+{
+    s_net_lost_hook = fn;
+}
+
 bool app_time_wall_clock_synced(void)
 {
     return s_wall_synced;
@@ -110,13 +128,13 @@ bool app_time_local_tm(struct tm *out)
     if (s_rtc_read && s_rtc_read(out)) {
         return true;
     }
-    if (!s_wall_synced) {
-        return false;
+    if (s_wall_synced) {
+        const time_t t = time(NULL);
+        if (t < (time_t)1704067200) { /* 2024-01-01 UTC sanity */
+            return false;
+        }
+        localtime_r(&t, out);
+        return true;
     }
-    const time_t t = time(NULL);
-    if (t < (time_t)1704067200) { /* 2024-01-01 UTC sanity */
-        return false;
-    }
-    localtime_r(&t, out);
-    return true;
+    return false;
 }

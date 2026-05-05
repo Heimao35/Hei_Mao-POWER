@@ -20,6 +20,8 @@
 #define CLOCK_ANIM_BASE_MS       380
 #define CLOCK_ANIM_PER_SLOT_MS   95
 #define CLOCK_ANIM_MAX_MS        2200
+/** After UI init, wait this long before the first clock digit update (RTC/SNTP read). */
+#define CLOCK_BOOT_DELAY_MS      1000
 
 /** Strip row index 0 = '-', 1..10 = '0'..'9' (logical slot in digit_to_slot). */
 #define CLOCK_STRIP_LAST_ROW     10
@@ -44,6 +46,7 @@ typedef struct {
 } ui_clock_ctx_t;
 
 static ui_clock_ctx_t s_clk;
+static bool         s_clock_boot_wait = true;
 
 static uint8_t digit_to_slot(int8_t d)
 {
@@ -230,6 +233,11 @@ static void clock_timer_cb(lv_timer_t *t)
         return;
     }
 
+    if (s_clock_boot_wait) {
+        s_clock_boot_wait = false;
+        lv_timer_set_period(t, 250);
+    }
+
     struct tm tmv;
     const bool ok = app_time_local_tm(&tmv);
 
@@ -249,6 +257,7 @@ void ui_main_clock_create(lv_obj_t *main_panel)
     }
 
     memset(&s_clk, 0, sizeof(s_clk));
+    s_clock_boot_wait = true;
 
     lv_obj_update_layout(main_panel);
 
@@ -305,9 +314,8 @@ void ui_main_clock_create(lv_obj_t *main_panel)
     lv_obj_clear_flag(s_clk.root, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(s_clk.root);
 
-    s_clk.tick = lv_timer_create(clock_timer_cb, 250, &s_clk);
+    s_clk.tick = lv_timer_create(clock_timer_cb, CLOCK_BOOT_DELAY_MS, &s_clk);
     if (s_clk.tick) {
         lv_timer_set_repeat_count(s_clk.tick, -1);
-        clock_timer_cb(s_clk.tick);
     }
 }

@@ -1,6 +1,6 @@
 /**
  * @file ui_status_bar.h
- * @brief Top-right status strip (Wi-Fi indicator; room reserved for battery).
+ * @brief Top-right status strip (Wi‑Fi, battery %, battery icon, charging bolt).
  */
 #ifndef UI_STATUS_BAR_H
 #define UI_STATUS_BAR_H

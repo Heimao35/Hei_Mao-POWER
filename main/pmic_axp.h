@@ -9,7 +9,6 @@ extern "C" {
 
 #include <stdint.h>
 #include "driver/i2c.h"
-void PMIC_GetBatteryLevel(void *arg);
 
 #ifdef __cplusplus
 } /*extern "C"*/
@@ -22,6 +21,8 @@ void PMIC_GetBatteryLevel(void *arg);
 #define XPOWERS_AXP2101_CHIP_ID                          (0x4A)
 
 #define XPOWERS_AXP2101_STATUS1                          (0x00)
+/** STATUS1 bit5: VBUS good (1 = valid USB input present). */
+#define XPOWERS_AXP2101_STATUS1_VBUS_GOOD                (1U << 5)
 #define XPOWERS_AXP2101_STATUS2                          (0x01)
 #define XPOWERS_AXP2101_IC_TYPE                          (0x03)
 
