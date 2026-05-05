@@ -28,6 +28,8 @@
 #define BAT_ROOT_H               (BAT_BODY_H + 6)
 #define BAT_TIP_W                5
 #define BAT_TIP_H                12
+/** Fill inset from body left; was @ref BAT_INNER_PAD, shifted 3px left for tighter layout. */
+#define BAT_FILL_X_OFS           ((lv_coord_t)(BAT_INNER_PAD - 3))
 
 static lv_obj_t *s_strip;
 static lv_obj_t *s_wifi_lbl;
@@ -64,7 +66,7 @@ static void apply_power_readings(void *p)
         lv_label_set_text(s_pct_lbl, buf);
         lv_obj_clear_flag(s_pct_lbl, LV_OBJ_FLAG_HIDDEN);
 
-        const int inner = BAT_BODY_W - 2 * BAT_INNER_PAD;
+        const int inner = (int)BAT_BODY_W - (int)BAT_INNER_PAD - (int)BAT_FILL_X_OFS;
         int         fw    = (int)soc * inner / 100;
         if (soc > 0 && fw < 4) {
             fw = 4;
@@ -73,6 +75,13 @@ static void apply_power_readings(void *p)
             fw = inner;
         }
         lv_obj_set_width(s_bat_fill, (lv_coord_t)fw);
+        lv_color_t fill_col = lv_color_hex(0x64748B);
+        if (soc < 20) {
+            fill_col = lv_color_hex(0xDC2626);
+        } else if (soc < 40) {
+            fill_col = lv_color_hex(0xEAB308);
+        }
+        lv_obj_set_style_bg_color(s_bat_fill, fill_col, LV_PART_MAIN);
     } else {
         lv_label_set_text(s_pct_lbl, "--");
         lv_obj_clear_flag(s_pct_lbl, LV_OBJ_FLAG_HIDDEN);
@@ -234,10 +243,10 @@ void ui_status_bar_init(lv_obj_t *screen)
     lv_obj_set_style_bg_color(s_bat_fill, lv_color_hex(0x64748B), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_bat_fill, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_bat_fill, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(s_bat_fill, 4, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_bat_fill, 0, LV_PART_MAIN);
     lv_obj_set_height(s_bat_fill, BAT_BODY_H - 2 * BAT_INNER_PAD);
     lv_obj_set_width(s_bat_fill, 0);
-    lv_obj_align(s_bat_fill, LV_ALIGN_LEFT_MID, BAT_INNER_PAD, 0);
+    lv_obj_align(s_bat_fill, LV_ALIGN_LEFT_MID, BAT_FILL_X_OFS, 0);
 
     lv_obj_t *tip = lv_obj_create(s_bat_root);
     lv_obj_clear_flag(tip, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
