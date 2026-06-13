@@ -6,7 +6,7 @@
  * when the shown slot index increases, strip Y moves downward (ease-out).
  */
 #include "ui_main_clock.h"
-#include "ui_menu_config.h"
+#include "ui_power_config.h"
 #include "app_time.h"
 
 #include "lvgl.h"
@@ -339,7 +339,7 @@ void ui_main_clock_boot_slide_in(void)
      * Mixing them doubles the TOP_RIGHT (pw - w) offset and moves the clock off-screen.
      */
     const lv_coord_t x_target = lv_obj_get_x_aligned(s_clk.root);
-    const lv_coord_t x_from = x_target + UI_MENU_BOOT_CLOCK_SLIDE_PX;
+    const lv_coord_t x_from = x_target + UI_POWER_BOOT_CLOCK_SLIDE_PX;
     lv_obj_set_x(s_clk.root, x_from);
 
     lv_anim_t a;
@@ -347,7 +347,7 @@ void ui_main_clock_boot_slide_in(void)
     lv_anim_set_var(&a, s_clk.root);
     lv_anim_set_exec_cb(&a, boot_root_set_x_cb);
     lv_anim_set_values(&a, x_from, x_target);
-    lv_anim_set_time(&a, UI_MENU_BOOT_ANIM_MS);
+    lv_anim_set_time(&a, UI_POWER_BOOT_ANIM_MS);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
     lv_anim_start(&a);
 }

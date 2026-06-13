@@ -411,7 +411,7 @@ void ui_menu_wifi_populate(lv_obj_t *panel)
     lv_obj_set_style_border_width(c->scroll, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(c->scroll, 0, LV_PART_MAIN);
     lv_obj_set_scroll_dir(c->scroll, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(c->scroll, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_scrollbar_mode(c->scroll, LV_SCROLLBAR_MODE_OFF);
 
     const lv_coord_t inner_w = list_box_w - 16;
     c->scroll_inner = lv_obj_create(c->scroll);
