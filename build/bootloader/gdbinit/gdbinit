@@ -1,2 +1,2 @@
-source F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader/gdbinit/symbols
-source F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader/gdbinit/connect
+source F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader/gdbinit/symbols
+source F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader/gdbinit/connect

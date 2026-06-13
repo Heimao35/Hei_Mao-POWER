@@ -17,4 +17,4 @@ set confirm off
 set confirm on
 
 # Load application symbols
-file F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader/bootloader.elf
+file F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader/bootloader.elf

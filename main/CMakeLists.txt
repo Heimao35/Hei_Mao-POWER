@@ -16,16 +16,19 @@ list(APPEND srcs "i2c_bus_share.c")
 list(APPEND srcs "axp2101_battery.c")
 list(REMOVE_DUPLICATES srcs)
 
-set(include_dirs 
-    . 
+set(include_dirs
+    .
     ui/menu
-    ui/custom 
-    ui/generated 
+    ui/custom
+    ui/generated
     ui/generated/guider_customer_fonts
-    ui/generated/guider_fonts
     ui/generated/images
-    )
- 
+)
+# LVGL Guider may omit guider_fonts when no built-in fonts are exported; empty dirs are not in Git, so only add if present.
+if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/ui/generated/guider_fonts")
+    list(APPEND include_dirs ui/generated/guider_fonts)
+endif()
+
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS ${include_dirs}
@@ -37,6 +40,7 @@ idf_component_register(
         esp_lcd
         esp_timer
         esp_driver_rmt
+        esp_driver_ledc
         driver
         lvgl__lvgl
         esp_lcd_co5300

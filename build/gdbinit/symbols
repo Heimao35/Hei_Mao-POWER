@@ -13,8 +13,8 @@ end
 
 # Load bootloader symbols
 set confirm off
-    add-symbol-file F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader/bootloader.elf
+    add-symbol-file F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader/bootloader.elf
 set confirm on
 
 # Load application symbols
-file F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/Opal.elf
+file F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/Opal.elf

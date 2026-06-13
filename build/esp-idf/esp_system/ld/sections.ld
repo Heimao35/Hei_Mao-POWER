@@ -1,6 +1,6 @@
 /* Automatically generated file; DO NOT EDIT */
 /* Espressif IoT Development Framework Linker Script */
-/* Generated from: F:\PROJECT\ESP32_TERMINAL\code\ESP-TERMINAL\build\esp-idf\esp_system\ld\sections.ld.in */
+/* Generated from: F:\PROJECT\Hei_Mao-power\code\ESP-TERMINAL\build\esp-idf\esp_system\ld\sections.ld.in */
 
 /*
 
@@ -265,7 +265,6 @@ SECTIONS
     *libapp_trace.a:app_trace_util.*(.literal .literal.* .text .text.*)
     *libapp_trace.a:port_uart.*(.literal .literal.* .text .text.*)
     *libclang_rt.builtins.a:_divsf3.*(.literal .literal.* .text .text.*)
-    *libcoexist.a:(.coexiram .coexiram.*)
     *libdriver.a:twai.*(.literal.twai_intr_handler_main .text.twai_intr_handler_main)
     *libesp_adc.a:adc_oneshot.*(.literal.adc_oneshot_read_isr .text.adc_oneshot_read_isr)
     *libesp_driver_gptimer.a:gptimer.*(.literal.gptimer_default_isr .text.gptimer_default_isr)
@@ -437,7 +436,7 @@ SECTIONS
     *(.gnu.linkonce.s.*)
     *(.gnu.linkonce.s2.*)
     *(.jcr)
-    *(EXCLUDE_FILE(*libbt.a *libbtdm_app.a) .data EXCLUDE_FILE(*libbt.a *libbtdm_app.a) .data.*)
+    *(.data .data.*)
     *(.dram1 .dram1.*)
     _coredump_dram_start = ABSOLUTE(.);
     *(.dram2.coredump .dram2.coredump.*)
@@ -445,16 +444,6 @@ SECTIONS
     *libapp_trace.a:app_trace.*(.rodata .rodata.* .sdata2 .sdata2.* .srodata .srodata.*)
     *libapp_trace.a:app_trace_util.*(.rodata .rodata.* .sdata2 .sdata2.* .srodata .srodata.*)
     *libapp_trace.a:port_uart.*(.rodata .rodata.* .sdata2 .sdata2.* .srodata .srodata.*)
-    . = ALIGN(4);
-    _bt_data_start = ABSOLUTE(.);
-    *libbt.a:(.data .data.*)
-    . = ALIGN(4);
-    _bt_data_end = ABSOLUTE(.);
-    . = ALIGN(4);
-    _bt_controller_data_start = ABSOLUTE(.);
-    *libbtdm_app.a:(.data .data.*)
-    . = ALIGN(4);
-    _bt_controller_data_end = ABSOLUTE(.);
     *libclang_rt.builtins.a:_divsf3.*(.rodata .rodata.* .sdata2 .sdata2.* .srodata .srodata.*)
     *libesp_hw_support.a:clk_utils.*(.rodata .rodata.* .sdata2 .sdata2.* .srodata .srodata.*)
     *libesp_hw_support.a:esp_memory_utils.*(.rodata .rodata.* .sdata2 .sdata2.* .srodata .srodata.*)
@@ -550,30 +539,10 @@ SECTIONS
      * (See components/esp_system/app.lf).
 
      */
-    *(EXCLUDE_FILE(*libbt.a *libbtdm_app.a) .bss EXCLUDE_FILE(*libbt.a *libbtdm_app.a) .bss.*)
+    *(.bss .bss.*)
     *(.dynbss .dynsbss .gnu.linkonce.b .gnu.linkonce.b.* .gnu.linkonce.sb .gnu.linkonce.sb.* .gnu.linkonce.sb2 .gnu.linkonce.sb2.* .sbss .sbss.* .sbss2 .sbss2.* .scommon .share.mem)
     *(.ext_ram.bss .ext_ram.bss.*)
-    *(EXCLUDE_FILE(*libbt.a *libbtdm_app.a) COMMON)
-    . = ALIGN(4);
-    _bt_bss_start = ABSOLUTE(.);
-    *libbt.a:(.bss .bss.*)
-    . = ALIGN(4);
-    _bt_bss_end = ABSOLUTE(.);
-    . = ALIGN(4);
-    _bt_common_start = ABSOLUTE(.);
-    *libbt.a:(COMMON)
-    . = ALIGN(4);
-    _bt_common_end = ABSOLUTE(.);
-    . = ALIGN(4);
-    _bt_controller_bss_start = ABSOLUTE(.);
-    *libbtdm_app.a:(.bss .bss.*)
-    . = ALIGN(4);
-    _bt_controller_bss_end = ABSOLUTE(.);
-    . = ALIGN(4);
-    _bt_controller_common_start = ABSOLUTE(.);
-    *libbtdm_app.a:(COMMON)
-    . = ALIGN(4);
-    _bt_controller_common_end = ABSOLUTE(.);
+    *(COMMON)
     
  . = ALIGN(8); 
  _bss_end = ABSOLUTE(.);
@@ -599,7 +568,6 @@ SECTIONS
     *(EXCLUDE_FILE(*libnet80211.a *libpp.a) .wifirxiram EXCLUDE_FILE(*libnet80211.a *libpp.a) .wifirxiram.*)
     *(.wifislpiram .wifislpiram.*)
     *(EXCLUDE_FILE(*libnet80211.a *libpp.a) .wifislprxiram EXCLUDE_FILE(*libnet80211.a *libpp.a) .wifislprxiram.*)
-    *libcoexist.a:(.coexsleepiram .coexsleepiram.*)
     *libdriver.a:twai.*(.literal.twai_clear_receive_queue .literal.twai_clear_receive_queue_v2 .literal.twai_clear_transmit_queue .literal.twai_clear_transmit_queue_v2 .literal.twai_driver_install .literal.twai_driver_install_v2 .literal.twai_driver_uninstall .literal.twai_driver_uninstall_v2 .literal.twai_free_driver_obj .literal.twai_get_status_info .literal.twai_get_status_info_v2 .literal.twai_initiate_recovery .literal.twai_initiate_recovery_v2 .literal.twai_read_alerts .literal.twai_read_alerts_v2 .literal.twai_receive .literal.twai_receive_v2 .literal.twai_reconfigure_alerts .literal.twai_reconfigure_alerts_v2 .literal.twai_start .literal.twai_start_v2 .literal.twai_stop .literal.twai_stop_v2 .literal.twai_transmit .literal.twai_transmit_v2 .literal.twai_transmit_v2$part$0 .text .text.twai_clear_receive_queue .text.twai_clear_receive_queue_v2 .text.twai_clear_transmit_queue .text.twai_clear_transmit_queue_v2 .text.twai_driver_install .text.twai_driver_install_v2 .text.twai_driver_uninstall .text.twai_driver_uninstall_v2 .text.twai_free_driver_obj .text.twai_get_status_info .text.twai_get_status_info_v2 .text.twai_initiate_recovery .text.twai_initiate_recovery_v2 .text.twai_read_alerts .text.twai_read_alerts_v2 .text.twai_receive .text.twai_receive_v2 .text.twai_reconfigure_alerts .text.twai_reconfigure_alerts_v2 .text.twai_start .text.twai_start_v2 .text.twai_stop .text.twai_stop_v2 .text.twai_transmit .text.twai_transmit_v2 .text.twai_transmit_v2$part$0)
     *libesp_adc.a:adc_oneshot.*(.literal.adc_oneshot_channel_to_io .literal.adc_oneshot_config_channel .literal.adc_oneshot_del_unit .literal.adc_oneshot_get_calibrated_result .literal.adc_oneshot_io_to_channel .literal.adc_oneshot_new_unit .literal.adc_oneshot_read .text .text.adc_oneshot_channel_to_io .text.adc_oneshot_config_channel .text.adc_oneshot_del_unit .text.adc_oneshot_get_calibrated_result .text.adc_oneshot_io_to_channel .text.adc_oneshot_new_unit .text.adc_oneshot_read)
     *libesp_driver_gptimer.a:gptimer.*(.literal.gptimer_del_timer .literal.gptimer_destroy .literal.gptimer_disable .literal.gptimer_enable .literal.gptimer_get_captured_count .literal.gptimer_get_raw_count .literal.gptimer_get_resolution .literal.gptimer_new_timer .literal.gptimer_register_event_callbacks .literal.gptimer_set_alarm_action .literal.gptimer_set_raw_count .literal.gptimer_start .literal.gptimer_stop .text .text.gptimer_del_timer .text.gptimer_destroy .text.gptimer_disable .text.gptimer_enable .text.gptimer_get_captured_count .text.gptimer_get_raw_count .text.gptimer_get_resolution .text.gptimer_new_timer .text.gptimer_register_event_callbacks .text.gptimer_set_alarm_action .text.gptimer_set_raw_count .text.gptimer_start .text.gptimer_stop)
@@ -611,7 +579,7 @@ SECTIONS
     *libesp_hw_support.a:periph_ctrl.*(.literal.periph_ll_get_clk_en_mask .literal.periph_ll_get_rst_en_mask .literal.periph_module_disable .literal.periph_module_enable .literal.periph_rcc_acquire_enter .literal.periph_rcc_acquire_exit .literal.periph_rcc_release_enter .literal.periph_rcc_release_exit .text .text.periph_ll_get_clk_en_mask .text.periph_ll_get_rst_en_mask .text.periph_module_disable .text.periph_module_enable .text.periph_rcc_acquire_enter .text.periph_rcc_acquire_exit .text.periph_rcc_release_enter .text.periph_rcc_release_exit)
     *libesp_hw_support.a:rtc_init.*(.literal.get_rtc_dbias_by_efuse$constprop$0 .literal.rtc_init .text .text.get_rtc_dbias_by_efuse$constprop$0 .text.rtc_init)
     *libesp_system.a:esp_system_chip.*(.literal.esp_get_free_heap_size .literal.esp_get_free_internal_heap_size .literal.esp_get_idf_version .literal.esp_get_minimum_free_heap_size .text .text.esp_get_free_heap_size .text.esp_get_free_internal_heap_size .text.esp_get_idf_version .text.esp_get_minimum_free_heap_size)
-    *libesp_wifi.a:esp_adapter.*(.literal.coex_deinit_wrapper .literal.coex_disable_wrapper .literal.coex_enable_wrapper .literal.coex_init_wrapper .literal.coex_register_start_cb_wrapper .literal.coex_schm_curr_period_get_wrapper .literal.coex_schm_curr_phase_get_wrapper .literal.coex_schm_get_phase_by_idx_wrapper .literal.coex_schm_interval_get_wrapper .literal.coex_schm_process_restart_wrapper .literal.coex_schm_register_cb_wrapper .literal.coex_schm_status_bit_clear_wrapper .literal.coex_schm_status_bit_set_wrapper .literal.coex_wifi_channel_set_wrapper .literal.coex_wifi_request_wrapper .literal.esp_cpu_intr_disable .literal.esp_cpu_intr_enable .literal.esp_event_post_wrapper .literal.esp_phy_disable_wrapper .literal.esp_phy_enable_wrapper .literal.event_group_wait_bits_wrapper .literal.get_time_wrapper .literal.mutex_create_wrapper .literal.mutex_delete_wrapper .literal.queue_create_wrapper .literal.queue_delete_wrapper .literal.queue_recv_wrapper .literal.queue_send_to_back_wrapper .literal.queue_send_to_front_wrapper .literal.queue_send_wrapper .literal.recursive_mutex_create_wrapper .literal.set_intr_wrapper .literal.set_isr_wrapper .literal.task_create_pinned_to_core_wrapper .literal.task_create_wrapper .literal.wifi_clock_disable_wrapper .literal.wifi_clock_enable_wrapper .literal.wifi_create_queue .literal.wifi_create_queue_wrapper .literal.wifi_delete_queue .literal.wifi_delete_queue_wrapper .literal.wifi_reset_mac_wrapper .literal.wifi_thread_semphr_free .literal.wifi_thread_semphr_get_wrapper .text .text.clear_intr_wrapper .text.coex_deinit_wrapper .text.coex_disable_wrapper .text.coex_enable_wrapper .text.coex_init_wrapper .text.coex_register_start_cb_wrapper .text.coex_schm_curr_period_get_wrapper .text.coex_schm_curr_phase_get_wrapper .text.coex_schm_flexible_period_get_wrapper .text.coex_schm_flexible_period_set_wrapper .text.coex_schm_get_phase_by_idx_wrapper .text.coex_schm_interval_get_wrapper .text.coex_schm_process_restart_wrapper .text.coex_schm_register_cb_wrapper .text.coex_schm_status_bit_clear_wrapper .text.coex_schm_status_bit_set_wrapper .text.coex_wifi_channel_set_wrapper .text.coex_wifi_request_wrapper .text.esp_cpu_intr_disable .text.esp_cpu_intr_enable .text.esp_event_post_wrapper .text.esp_phy_disable_wrapper .text.esp_phy_enable_wrapper .text.event_group_wait_bits_wrapper .text.get_time_wrapper .text.mutex_create_wrapper .text.mutex_delete_wrapper .text.queue_create_wrapper .text.queue_delete_wrapper .text.queue_recv_wrapper .text.queue_send_to_back_wrapper .text.queue_send_to_front_wrapper .text.queue_send_wrapper .text.recursive_mutex_create_wrapper .text.set_intr_wrapper .text.set_isr_wrapper .text.task_create_pinned_to_core_wrapper .text.task_create_wrapper .text.task_get_max_priority_wrapper .text.wifi_clock_disable_wrapper .text.wifi_clock_enable_wrapper .text.wifi_create_queue .text.wifi_create_queue_wrapper .text.wifi_delete_queue .text.wifi_delete_queue_wrapper .text.wifi_reset_mac_wrapper .text.wifi_thread_semphr_free .text.wifi_thread_semphr_get_wrapper)
+    *libesp_wifi.a:esp_adapter.*(.literal.esp_cpu_intr_disable .literal.esp_cpu_intr_enable .literal.esp_event_post_wrapper .literal.esp_phy_disable_wrapper .literal.esp_phy_enable_wrapper .literal.event_group_wait_bits_wrapper .literal.get_time_wrapper .literal.mutex_create_wrapper .literal.mutex_delete_wrapper .literal.queue_create_wrapper .literal.queue_delete_wrapper .literal.queue_recv_wrapper .literal.queue_send_to_back_wrapper .literal.queue_send_to_front_wrapper .literal.queue_send_wrapper .literal.recursive_mutex_create_wrapper .literal.set_intr_wrapper .literal.set_isr_wrapper .literal.task_create_pinned_to_core_wrapper .literal.task_create_wrapper .literal.wifi_clock_disable_wrapper .literal.wifi_clock_enable_wrapper .literal.wifi_create_queue .literal.wifi_create_queue_wrapper .literal.wifi_delete_queue .literal.wifi_delete_queue_wrapper .literal.wifi_reset_mac_wrapper .literal.wifi_thread_semphr_free .literal.wifi_thread_semphr_get_wrapper .text .text.clear_intr_wrapper .text.coex_deinit_wrapper .text.coex_disable_wrapper .text.coex_enable_wrapper .text.coex_init_wrapper .text.coex_register_start_cb_wrapper .text.coex_schm_curr_period_get_wrapper .text.coex_schm_curr_phase_get_wrapper .text.coex_schm_flexible_period_get_wrapper .text.coex_schm_flexible_period_set_wrapper .text.coex_schm_get_phase_by_idx_wrapper .text.coex_schm_interval_get_wrapper .text.coex_schm_process_restart_wrapper .text.coex_schm_register_cb_wrapper .text.coex_schm_status_bit_clear_wrapper .text.coex_schm_status_bit_set_wrapper .text.coex_wifi_channel_set_wrapper .text.coex_wifi_request_wrapper .text.esp_cpu_intr_disable .text.esp_cpu_intr_enable .text.esp_event_post_wrapper .text.esp_phy_disable_wrapper .text.esp_phy_enable_wrapper .text.event_group_wait_bits_wrapper .text.get_time_wrapper .text.mutex_create_wrapper .text.mutex_delete_wrapper .text.queue_create_wrapper .text.queue_delete_wrapper .text.queue_recv_wrapper .text.queue_send_to_back_wrapper .text.queue_send_to_front_wrapper .text.queue_send_wrapper .text.recursive_mutex_create_wrapper .text.set_intr_wrapper .text.set_isr_wrapper .text.task_create_pinned_to_core_wrapper .text.task_create_wrapper .text.task_get_max_priority_wrapper .text.wifi_clock_disable_wrapper .text.wifi_clock_enable_wrapper .text.wifi_create_queue .text.wifi_create_queue_wrapper .text.wifi_delete_queue .text.wifi_delete_queue_wrapper .text.wifi_reset_mac_wrapper .text.wifi_thread_semphr_free .text.wifi_thread_semphr_get_wrapper)
     *libesp_wifi.a:wifi_netif.*(.literal.esp_wifi_create_if_driver .literal.esp_wifi_destroy_if_driver .literal.esp_wifi_get_if_mac .literal.esp_wifi_register_if_rxcb .literal.wifi_ap_receive .literal.wifi_driver_start .literal.wifi_free .literal.wifi_transmit .text .text.esp_wifi_create_if_driver .text.esp_wifi_destroy_if_driver .text.esp_wifi_get_if_mac .text.esp_wifi_is_if_ready_when_started .text.esp_wifi_register_if_rxcb .text.wifi_ap_receive .text.wifi_driver_start .text.wifi_free .text.wifi_transmit)
     *libfreertos.a:app_startup.*(.literal .literal.* .text .text.*)
     *libfreertos.a:freertos_compatibility.*(.literal .literal.* .text .text.*)

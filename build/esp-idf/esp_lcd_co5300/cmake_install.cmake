@@ -1,4 +1,4 @@
-# Install script for directory: F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/components/esp_lcd_co5300
+# Install script for directory: F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/components/esp_lcd_co5300
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

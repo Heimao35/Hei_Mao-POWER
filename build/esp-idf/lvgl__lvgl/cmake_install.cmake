@@ -1,4 +1,4 @@
-# Install script for directory: F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/components/lvgl__lvgl
+# Install script for directory: F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/components/lvgl__lvgl
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

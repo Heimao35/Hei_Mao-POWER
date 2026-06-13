@@ -10,18 +10,18 @@ if(NOT EXISTS "D:/ban gong/espidf/v5.4.3/esp-idf/components/bootloader/subprojec
   file(MAKE_DIRECTORY "D:/ban gong/espidf/v5.4.3/esp-idf/components/bootloader/subproject")
 endif()
 file(MAKE_DIRECTORY
-  "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader"
-  "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader-prefix"
-  "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader-prefix/tmp"
-  "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader-prefix/src/bootloader-stamp"
-  "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader-prefix/src"
-  "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader-prefix/src/bootloader-stamp"
+  "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader"
+  "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader-prefix"
+  "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader-prefix/tmp"
+  "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader-prefix/src/bootloader-stamp"
+  "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader-prefix/src"
+  "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader-prefix/src/bootloader-stamp"
 )
 
 set(configSubDirs )
 foreach(subDir IN LISTS configSubDirs)
-    file(MAKE_DIRECTORY "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
+    file(MAKE_DIRECTORY "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader-prefix/src/bootloader-stamp/${subDir}")
 endforeach()
 if(cfgdir)
-  file(MAKE_DIRECTORY "F:/PROJECT/ESP32_TERMINAL/code/ESP-TERMINAL/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
+  file(MAKE_DIRECTORY "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/bootloader-prefix/src/bootloader-stamp${cfgdir}") # cfgdir has leading slash
 endif()
