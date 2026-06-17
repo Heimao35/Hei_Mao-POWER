@@ -5,6 +5,7 @@
 #include "ui_status_bar.h"
 #include "ui_power_config.h"
 #include "net_wifi.h"
+#include "pd_spoof.h"
 
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -18,6 +19,7 @@
 #define UI_STATUS_EDGE_PAD  28
 
 static lv_obj_t *s_strip;
+static lv_obj_t *s_pd_lbl;
 static lv_obj_t *s_wifi_lbl;
 static bool      s_events_registered;
 
@@ -29,6 +31,38 @@ static void boot_anim_set_y_cb(void *var, int32_t v)
 typedef struct {
     bool show;
 } wifi_vis_msg_t;
+
+typedef struct {
+    bool show;
+} pd_vis_msg_t;
+
+static void pd_vis_apply(void *p)
+{
+    pd_vis_msg_t *m = (pd_vis_msg_t *)p;
+    if (!m) {
+        return;
+    }
+    if (s_pd_lbl && lv_obj_is_valid(s_pd_lbl)) {
+        if (m->show) {
+            lv_obj_clear_flag(s_pd_lbl, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_pd_lbl, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    lv_mem_free(m);
+}
+
+static void post_pd_visible(bool show)
+{
+    pd_vis_msg_t *m = (pd_vis_msg_t *)lv_mem_alloc(sizeof(*m));
+    if (!m) {
+        return;
+    }
+    m->show = show;
+    if (lv_async_call(pd_vis_apply, m) != LV_RES_OK) {
+        lv_mem_free(m);
+    }
+}
 
 static void wifi_vis_apply(void *p)
 {
@@ -82,6 +116,11 @@ void ui_status_bar_sync_wifi(void)
     post_wifi_visible(net_wifi_sta_has_ip());
 }
 
+void ui_status_bar_sync_pd(bool enabled)
+{
+    post_pd_visible(enabled);
+}
+
 void ui_status_bar_boot_slide_in(void)
 {
     if (!s_strip || !lv_obj_is_valid(s_strip)) {
@@ -119,7 +158,17 @@ void ui_status_bar_init(lv_obj_t *screen)
     lv_obj_set_style_bg_opa(s_strip, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_strip, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(s_strip, 0, LV_PART_MAIN);
+    lv_obj_set_flex_flow(s_strip, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_strip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s_strip, 10, LV_PART_MAIN);
     lv_obj_align(s_strip, LV_ALIGN_TOP_RIGHT, -UI_STATUS_EDGE_PAD, UI_STATUS_STRIP_Y);
+
+    s_pd_lbl = lv_label_create(s_strip);
+    lv_obj_clear_flag(s_pd_lbl, LV_OBJ_FLAG_CLICKABLE);
+    lv_label_set_text(s_pd_lbl, "PD");
+    lv_obj_set_style_text_color(s_pd_lbl, lv_color_hex(0x5EEAD4), LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_pd_lbl, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_add_flag(s_pd_lbl, LV_OBJ_FLAG_HIDDEN);
 
     s_wifi_lbl = lv_label_create(s_strip);
     lv_obj_clear_flag(s_wifi_lbl, LV_OBJ_FLAG_CLICKABLE);
@@ -136,4 +185,9 @@ void ui_status_bar_init(lv_obj_t *screen)
     }
 
     ui_status_bar_sync_wifi();
+
+    pd_spoof_status_t pd_st = {0};
+    if (pd_spoof_get_status(&pd_st) == ESP_OK) {
+        ui_status_bar_sync_pd(pd_st.enabled);
+    }
 }

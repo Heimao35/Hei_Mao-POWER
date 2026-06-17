@@ -10,11 +10,13 @@ list(APPEND srcs
     "ui/menu/ui_power_app.c"
     "ui/menu/ui_power_main.c"
     "ui/menu/ui_power_sheet.c"
+    "ui/menu/ui_pd_panel.c"
     "ui/menu/ui_menu_brightness.c"
     "ui/menu/ui_menu_wifi.c"
     "ui/menu/ui_menu_volume.c"
     "i2c_bus_share.c"
     "power_meter.c"
+    "ina236.c"
     "pd_spoof.c"
     "audio_volume.c"
 )

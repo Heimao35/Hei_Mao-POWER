@@ -4,6 +4,7 @@
  */
 #include "ui_power_sheet.h"
 #include "ui_power_config.h"
+#include "ui_pd_panel.h"
 
 #include "lvgl.h"
 #include <stdbool.h>
@@ -92,11 +93,7 @@ void ui_power_sheet_create(lv_obj_t *screen, ui_power_sheet_action_cb_t cb, void
     lv_obj_align(s_bottom_sheet, LV_ALIGN_TOP_MID, 0, h);
     lv_obj_clear_flag(s_bottom_sheet, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *pd_title = lv_label_create(s_bottom_sheet);
-    lv_label_set_text(pd_title, "PD Spoof");
-    lv_obj_set_style_text_color(pd_title, lv_color_hex(0x94A3B8), LV_PART_MAIN);
-    lv_obj_set_style_text_font(pd_title, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_align(pd_title, LV_ALIGN_TOP_MID, 0, 48);
+    ui_pd_panel_create(s_bottom_sheet);
 }
 
 lv_obj_t *ui_power_sheet_get_top(void)

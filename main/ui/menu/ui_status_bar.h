@@ -13,6 +13,7 @@ extern "C" {
 
 void ui_status_bar_init(lv_obj_t *screen);
 void ui_status_bar_sync_wifi(void);
+void ui_status_bar_sync_pd(bool enabled);
 void ui_status_bar_boot_slide_in(void);
 
 #ifdef __cplusplus

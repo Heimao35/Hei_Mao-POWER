@@ -10,6 +10,8 @@
 #include "ui_menu_wifi.h"
 #include "ui_menu_volume.h"
 #include "ui_status_bar.h"
+#include "ui_pd_panel.h"
+#include "pd_spoof.h"
 
 #include "lvgl.h"
 #include <string.h>
@@ -130,7 +132,8 @@ static void start_slide_x(lv_obj_t *obj, lv_coord_t from, lv_coord_t to,
 }
 
 static void start_slide_y(lv_obj_t *obj, lv_coord_t from, lv_coord_t to,
-                          void (*on_done)(void *), void *ud)
+                          void (*on_done)(void *), void *ud,
+                          lv_anim_path_cb_t path_cb)
 {
     slide_sync_t *sync = (slide_sync_t *)lv_mem_alloc(sizeof(*sync));
     if (!sync) {
@@ -146,7 +149,7 @@ static void start_slide_y(lv_obj_t *obj, lv_coord_t from, lv_coord_t to,
     lv_anim_set_exec_cb(&a, anim_set_y_cb);
     lv_anim_set_values(&a, from, to);
     lv_anim_set_time(&a, UI_POWER_SLIDE_MS);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+    lv_anim_set_path_cb(&a, path_cb ? path_cb : lv_anim_path_ease_in_out);
     lv_anim_set_user_data(&a, sync);
     lv_anim_set_ready_cb(&a, slide_anim_ready);
     lv_anim_start(&a);
@@ -277,7 +280,7 @@ static void toggle_top_sheet(bool open)
     ui_power_sheet_set_top_open(open);
     const lv_coord_t y_target = open ? 0 : -UI_POWER_TOP_SHEET_H;
     const lv_coord_t y_from   = lv_obj_get_y(top);
-    start_slide_y(top, y_from, y_target, NULL, NULL);
+    start_slide_y(top, y_from, y_target, NULL, NULL, lv_anim_path_ease_in_out);
 }
 
 static void toggle_bottom_sheet(bool open)
@@ -286,10 +289,24 @@ static void toggle_bottom_sheet(bool open)
     if (!bot) {
         return;
     }
+
+    const lv_coord_t scr_h = ui_power_sheet_screen_h();
+    const lv_coord_t y_hidden = scr_h;
+    const lv_coord_t y_shown  = 0;
+
+    lv_anim_del(bot, anim_set_y_cb);
+
+    if (open) {
+        lv_obj_clear_flag(bot, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_y(bot, y_hidden);
+        lv_obj_move_foreground(bot);
+    }
+
     ui_power_sheet_set_bottom_open(open);
-    const lv_coord_t y_target = open ? 0 : ui_power_sheet_screen_h();
-    const lv_coord_t y_from   = lv_obj_get_y(bot);
-    start_slide_y(bot, y_from, y_target, NULL, NULL);
+    const lv_coord_t y_target = open ? y_shown : y_hidden;
+    const lv_coord_t y_from   = open ? y_hidden : lv_obj_get_y(bot);
+    const lv_anim_path_cb_t path = open ? lv_anim_path_ease_out : lv_anim_path_ease_in;
+    start_slide_y(bot, y_from, y_target, NULL, NULL, path);
 }
 
 typedef struct {
@@ -505,6 +522,43 @@ static void refresh_timer_cb(lv_timer_t *t)
 {
     (void)t;
     ui_power_main_refresh();
+    if (ui_power_sheet_bottom_is_open()) {
+        ui_pd_panel_refresh();
+    }
+}
+
+typedef struct {
+    pd_spoof_event_t evt;
+} pd_async_msg_t;
+
+static void pd_async_handler(void *p)
+{
+    pd_async_msg_t *msg = (pd_async_msg_t *)p;
+    if (!msg) {
+        return;
+    }
+    ui_pd_panel_sync_from_driver();
+    if (msg->evt.id == PD_SPOOF_EVT_TOGGLED) {
+        ui_status_bar_sync_pd(msg->evt.enabled);
+        if (msg->evt.from_button && !ui_power_sheet_bottom_is_open()) {
+            ui_pd_panel_show_toggle_toast(msg->evt.enabled);
+        }
+    }
+    lv_mem_free(msg);
+}
+
+static void pd_event_cb(const pd_spoof_event_t *evt, void *user_data)
+{
+    (void)user_data;
+    if (!evt) {
+        return;
+    }
+    pd_async_msg_t *msg = (pd_async_msg_t *)lv_mem_alloc(sizeof(*msg));
+    if (!msg) {
+        return;
+    }
+    msg->evt = *evt;
+    lv_async_call(pd_async_handler, msg);
 }
 
 void ui_power_app_init(void)
@@ -551,6 +605,7 @@ void ui_power_app_init(void)
     ui_power_main_create(main_p);
 
     ui_power_sheet_create(scr, sheet_action_cb, NULL);
+    pd_spoof_set_event_cb(pd_event_cb, NULL);
 
     lv_obj_t *bottom = ui_power_sheet_get_bottom();
     if (bottom) {

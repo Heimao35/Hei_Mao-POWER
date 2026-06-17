@@ -33,6 +33,11 @@ extern "C" {
 /** 主界面背景色 */
 #define UI_POWER_MAIN_BG            0x0f172a
 
+/** 折线图满量程（略大于 28 V / 5 A / 140 W 设计上限） */
+#define UI_POWER_CHART_V_MAX        30.0f
+#define UI_POWER_CHART_I_MAX_A      5.5f
+#define UI_POWER_CHART_P_MAX_W      150.0f
+
 #ifdef __cplusplus
 }
 #endif
