@@ -2,7 +2,7 @@
  * @file pd_spoof.c
  * @brief CH224Q I2C 驱动与 CC 通断控制。
  *
- * CC MOS：低电平接通、高电平断开（与外部下拉默认接通一致）。
+ * CC MOS：GPIO 作为 MOS 控制脚。当前项目约定为“始终上拉保持高电平”，不再跟随 PD 开关做通断控制。
  */
 #include "pd_spoof.h"
 
@@ -23,8 +23,6 @@ enum {
 
 #define CH224_ADDR_0  0x22
 #define CH224_ADDR_1  0x23
-
-#define CC_SETTLE_MS  50
 
 /** 0x09: bit3=PD 握手（CH224Q/A 手册） */
 #define STATUS_PD_ACTIVE  (1u << 3)
@@ -79,28 +77,35 @@ static esp_err_t probe_addr(uint8_t addr)
 static uint8_t voltage_to_code(pd_spoof_voltage_t v)
 {
     switch (v) {
+    case PD_SPOOF_VOLT_5V:
+        return 0;
     case PD_SPOOF_VOLT_9V:
         return 1;
     case PD_SPOOF_VOLT_12V:
         return 2;
+    case PD_SPOOF_VOLT_15V:
+        return 3;
     case PD_SPOOF_VOLT_20V:
         return 4;
     case PD_SPOOF_VOLT_28V:
         return 5;
     default:
-        return 1;
+        return 0;
     }
 }
 
-/** 低电平接通 CC，高电平断开 CC。 */
-static void cc_set_connected(bool connect)
+/**
+ * MOS 控制脚：始终保持上拉/高电平，不参与 PD 开关逻辑。
+ * 这样可以移除档位切换时复杂的拉高/拉低过渡过程，避免对外部电路造成扰动。
+ */
+static void cc_mos_hold_high(void)
 {
-    gpio_set_level(PD_SPOOF_CC_GPIO, connect ? 0 : 1);
+    gpio_set_level(PD_SPOOF_CC_GPIO, 1);
 }
 
-static bool cc_is_connected(void)
+static bool cc_mos_is_high(void)
 {
-    return gpio_get_level(PD_SPOOF_CC_GPIO) == 0;
+    return gpio_get_level(PD_SPOOF_CC_GPIO) != 0;
 }
 
 static esp_err_t chip_write_voltage(pd_spoof_voltage_t v)
@@ -125,14 +130,25 @@ static esp_err_t pd_write_voltage_locked(pd_spoof_voltage_t v)
     return err;
 }
 
+/** 关闭诱骗：写 5V 并清除运行状态。调用方需已持有 I2C 锁（或无芯片时可不传锁）。 */
+static esp_err_t pd_disable_locked(void)
+{
+    esp_err_t err = ESP_OK;
+    if (s_i2c_addr != 0) {
+        err = pd_write_voltage_locked(PD_SPOOF_VOLT_5V);
+    }
+    s_enabled       = false;
+    s_max_current_a = 0.0f;
+    s_pd_active     = false;
+    return err;
+}
+
 static esp_err_t pd_apply_enabled(bool enable)
 {
     if (enable) {
         if (s_enabled) {
             return ESP_OK;
         }
-        cc_set_connected(true);
-        vTaskDelay(pdMS_TO_TICKS(CC_SETTLE_MS));
 
         if (s_i2c_addr != 0) {
             if (!i2c_bus_share_lock(pdMS_TO_TICKS(100))) {
@@ -150,12 +166,23 @@ static esp_err_t pd_apply_enabled(bool enable)
         if (!s_enabled) {
             return ESP_OK;
         }
-        cc_set_connected(false);
-        vTaskDelay(pdMS_TO_TICKS(CC_SETTLE_MS));
-        s_enabled       = false;
-        s_max_current_a = 0.0f;
-        s_pd_active     = false;
-        ESP_LOGI(TAG, "PD 已关闭，CC 已断开");
+
+        esp_err_t err = ESP_OK;
+        if (s_i2c_addr != 0) {
+            if (!i2c_bus_share_lock(pdMS_TO_TICKS(100))) {
+                return ESP_ERR_TIMEOUT;
+            }
+            err = pd_disable_locked();
+            i2c_bus_share_unlock();
+            if (err != ESP_OK) {
+                return err;
+            }
+        } else {
+            s_enabled       = false;
+            s_max_current_a = 0.0f;
+            s_pd_active     = false;
+        }
+        ESP_LOGI(TAG, "PD 已关闭，已切回 5V");
     }
     return ESP_OK;
 }
@@ -194,13 +221,13 @@ esp_err_t pd_spoof_init(i2c_port_t port)
     gpio_config_t cc_io = {
         .pin_bit_mask = (1ULL << PD_SPOOF_CC_GPIO),
         .mode         = GPIO_MODE_OUTPUT,
-        .pull_up_en   = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type    = GPIO_INTR_DISABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&cc_io));
-    /* 外部下拉默认已接通 CC；保持低电平与硬件一致 */
-    cc_set_connected(true);
+    /* MOS 控制脚不再由 PD 开关控制，初始化后始终保持高电平 */
+    cc_mos_hold_high();
 
     gpio_config_t pg_io = {
         .pin_bit_mask = (1ULL << PD_SPOOF_PG_GPIO),
@@ -233,14 +260,14 @@ esp_err_t pd_spoof_init(i2c_port_t port)
         }
     }
     if (s_i2c_addr != 0) {
-        (void)pd_write_voltage_locked(s_selected);
+        (void)pd_write_voltage_locked(PD_SPOOF_VOLT_5V);
     }
     i2c_bus_share_unlock();
 
     if (s_i2c_addr == 0) {
         ESP_LOGW(TAG, "未检测到 CH224 (0x22/0x23)，PD 功能受限");
     } else {
-        ESP_LOGI(TAG, "CH224 @ 0x%02X，CC=GPIO%d(低通/高断) PG=GPIO%d", s_i2c_addr,
+        ESP_LOGI(TAG, "CH224 @ 0x%02X，CC/MOS=GPIO%d(保持上拉高电平) PG=GPIO%d", s_i2c_addr,
                  (int)PD_SPOOF_CC_GPIO, (int)PD_SPOOF_PG_GPIO);
     }
 
@@ -249,7 +276,7 @@ esp_err_t pd_spoof_init(i2c_port_t port)
     }
 
     s_inited  = true;
-    s_enabled = true;
+    s_enabled = false;
     return ESP_OK;
 }
 
@@ -265,22 +292,36 @@ esp_err_t pd_spoof_select_voltage(pd_spoof_voltage_t voltage)
         return ESP_ERR_INVALID_STATE;
     }
 
-    s_selected = voltage;
+    if (voltage == s_selected) {
+        return ESP_OK;
+    }
+
+    const bool was_enabled = s_enabled;
+    s_selected             = voltage;
+
+    if (!was_enabled) {
+        emit_event(PD_SPOOF_EVT_VOLTAGE, false);
+        ESP_LOGI(TAG, "档位已预选 %dV", (int)voltage);
+        return ESP_OK;
+    }
 
     if (s_i2c_addr == 0) {
+        s_enabled = false;
         emit_event(PD_SPOOF_EVT_VOLTAGE, false);
+        emit_event(PD_SPOOF_EVT_TOGGLED, false);
         return ESP_ERR_NOT_FOUND;
     }
 
     if (!i2c_bus_share_lock(pdMS_TO_TICKS(100))) {
         return ESP_ERR_TIMEOUT;
     }
-    esp_err_t err = pd_write_voltage_locked(voltage);
+    esp_err_t err = pd_disable_locked();
     i2c_bus_share_unlock();
 
     if (err == ESP_OK) {
         emit_event(PD_SPOOF_EVT_VOLTAGE, false);
-        ESP_LOGI(TAG, "档位已切换 %dV", (int)voltage);
+        emit_event(PD_SPOOF_EVT_TOGGLED, false);
+        ESP_LOGI(TAG, "档位已预选 %dV，PD 已关闭", (int)voltage);
     }
     return err;
 }
@@ -314,7 +355,7 @@ esp_err_t pd_spoof_get_status(pd_spoof_status_t *out)
     }
 
     out->enabled            = s_enabled;
-    out->cc_connected       = cc_is_connected();
+    out->cc_connected       = cc_mos_is_high();
     out->selected_voltage   = s_selected;
     out->configured_voltage = s_configured;
     out->pg_ok              = gpio_get_level(PD_SPOOF_PG_GPIO) == 0;

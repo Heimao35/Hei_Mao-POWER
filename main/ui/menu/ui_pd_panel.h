@@ -17,6 +17,9 @@ void ui_pd_panel_refresh(void);
 /** 同步开关/高亮状态（外部事件回调调用，需在 LVGL 线程）。 */
 void ui_pd_panel_sync_from_driver(void);
 
+/** 同步开关状态；animate_switch 为 true 时播放滑块动画（如 GPIO0 触发）。 */
+void ui_pd_panel_sync_from_driver_ex(bool animate_switch);
+
 /** 显示物理按键触发的状态横幅（1 秒后自动收起）。 */
 void ui_pd_panel_show_toggle_toast(bool enabled);
 
