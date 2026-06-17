@@ -6,6 +6,7 @@
 
 #include "ina236.h"
 #include "i2c_bus_share.h"
+#include "buzzer.h"
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -51,6 +52,8 @@ static esp_err_t apply_range_alerts(ina236_range_t range)
 
 static esp_err_t switch_range(ina236_range_t range)
 {
+    const ina236_range_t prev = s_ina.range;
+
     if (!i2c_bus_share_lock(pdMS_TO_TICKS(100))) {
         return ESP_ERR_TIMEOUT;
     }
@@ -65,6 +68,14 @@ static esp_err_t switch_range(ina236_range_t range)
     (void)mask;
 
     i2c_bus_share_unlock();
+
+    if (err == ESP_OK && s_inited && prev != range) {
+        if (range == INA236_RANGE_COARSE) {
+            buzzer_play_pattern(BUZZER_PATTERN_RANGE_UP);
+        } else {
+            buzzer_play_pattern(BUZZER_PATTERN_RANGE_DOWN);
+        }
+    }
     return err;
 }
 

@@ -1,6 +1,6 @@
 /**
  * @file audio_volume.c
- * @brief 静音状态 NVS 持久化。
+ * @brief Mute 开关状态 NVS 持久化（开启 = 蜂鸣器启用）。
  */
 #include "audio_volume.h"
 
@@ -9,10 +9,11 @@
 #include "nvs_flash.h"
 
 #define TAG "audio_vol"
-#define NVS_NAMESPACE "audio"
-#define NVS_KEY_MUTED "muted"
+#define NVS_NAMESPACE   "audio"
+#define NVS_KEY_BUZZER  "bz_en"
+#define NVS_KEY_MUTED   "muted"
 
-static bool s_muted;
+static bool s_buzzer_enabled;
 
 static esp_err_t nvs_init_once(void)
 {
@@ -35,7 +36,7 @@ static esp_err_t nvs_init_once(void)
 
 void audio_volume_init(void)
 {
-    s_muted = false;
+    s_buzzer_enabled = false;
     if (nvs_init_once() != ESP_OK) {
         return;
     }
@@ -45,26 +46,32 @@ void audio_volume_init(void)
         return;
     }
     uint8_t v = 0;
-    err = nvs_get_u8(h, NVS_KEY_MUTED, &v);
-    nvs_close(h);
+    err = nvs_get_u8(h, NVS_KEY_BUZZER, &v);
     if (err == ESP_OK) {
-        s_muted = (v != 0);
+        s_buzzer_enabled = (v != 0);
+    } else {
+        err = nvs_get_u8(h, NVS_KEY_MUTED, &v);
+        if (err == ESP_OK) {
+            /* 旧版 muted=1 表示静音；新版开关开启才响 */
+            s_buzzer_enabled = (v == 0);
+        }
     }
+    nvs_close(h);
 }
 
-bool audio_volume_is_muted(void)
+bool audio_volume_buzzer_enabled(void)
 {
-    return s_muted;
+    return s_buzzer_enabled;
 }
 
-void audio_volume_set_muted(bool muted)
+void audio_volume_set_buzzer_enabled(bool enabled)
 {
-    s_muted = muted;
+    s_buzzer_enabled = enabled;
 }
 
-esp_err_t audio_volume_save_muted(bool muted)
+esp_err_t audio_volume_save_buzzer_enabled(bool enabled)
 {
-    s_muted = muted;
+    s_buzzer_enabled = enabled;
     if (nvs_init_once() != ESP_OK) {
         return ESP_FAIL;
     }
@@ -73,7 +80,7 @@ esp_err_t audio_volume_save_muted(bool muted)
     if (err != ESP_OK) {
         return err;
     }
-    err = nvs_set_u8(h, NVS_KEY_MUTED, muted ? 1U : 0U);
+    err = nvs_set_u8(h, NVS_KEY_BUZZER, enabled ? 1U : 0U);
     if (err == ESP_OK) {
         err = nvs_commit(h);
     }

@@ -1,6 +1,6 @@
 /**
  * @file audio_volume.h
- * @brief 音量/静音控制接口（NVS 掉电保存）。
+ * @brief Volume 页 Mute 开关：开启时蜂鸣器工作，关闭时不工作（NVS 掉电保存）。
  */
 #ifndef AUDIO_VOLUME_H
 #define AUDIO_VOLUME_H
@@ -14,9 +14,11 @@ extern "C" {
 #endif
 
 void audio_volume_init(void);
-bool audio_volume_is_muted(void);
-void audio_volume_set_muted(bool muted);
-esp_err_t audio_volume_save_muted(bool muted);
+
+/** Mute 开关是否开启（开启 = 蜂鸣器启用）。 */
+bool audio_volume_buzzer_enabled(void);
+void audio_volume_set_buzzer_enabled(bool enabled);
+esp_err_t audio_volume_save_buzzer_enabled(bool enabled);
 
 #ifdef __cplusplus
 }

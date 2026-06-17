@@ -49,6 +49,7 @@
 #include "pd_spoof.h"
 
 #include "audio_volume.h"
+#include "buzzer.h"
 
 
 
@@ -706,6 +707,10 @@ void app_main(void)
 
 
     audio_volume_init();
+
+    if (buzzer_init() != ESP_OK) {
+        ESP_LOGW(TAG, "蜂鸣器初始化失败");
+    }
 
     net_wifi_init();
 

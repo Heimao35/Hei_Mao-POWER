@@ -19,6 +19,7 @@ list(APPEND srcs
     "ina236.c"
     "pd_spoof.c"
     "audio_volume.c"
+    "buzzer.c"
 )
 list(REMOVE_DUPLICATES srcs)
 
@@ -37,6 +38,7 @@ idf_component_register(
         esp_event
         esp_lcd
         esp_timer
+        esp_driver_ledc
         driver
         lvgl__lvgl
         esp_lcd_co5300

@@ -12,6 +12,7 @@
 #include "ui_status_bar.h"
 #include "ui_pd_panel.h"
 #include "pd_spoof.h"
+#include "buzzer.h"
 
 #include "lvgl.h"
 #include <string.h>
@@ -560,6 +561,13 @@ static void pd_event_cb(const pd_spoof_event_t *evt, void *user_data)
     (void)user_data;
     if (!evt) {
         return;
+    }
+    if (evt->id == PD_SPOOF_EVT_TOGGLED) {
+        if (evt->enabled) {
+            buzzer_play_pattern(BUZZER_PATTERN_PD_ON);
+        } else {
+            buzzer_play_pattern(BUZZER_PATTERN_PD_OFF);
+        }
     }
     pd_async_msg_t *msg = (pd_async_msg_t *)lv_mem_alloc(sizeof(*msg));
     if (!msg) {

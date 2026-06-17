@@ -4,6 +4,7 @@
  */
 #include "ui_menu_volume.h"
 #include "audio_volume.h"
+#include "buzzer.h"
 
 #include "lvgl.h"
 
@@ -11,9 +12,13 @@ static void mute_switch_evt(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target(e);
     if (lv_event_get_code(e) == LV_EVENT_VALUE_CHANGED) {
-        const bool muted = lv_obj_has_state(sw, LV_STATE_CHECKED);
-        audio_volume_set_muted(muted);
-        (void)audio_volume_save_muted(muted);
+        const bool enabled     = lv_obj_has_state(sw, LV_STATE_CHECKED);
+        const bool was_enabled = audio_volume_buzzer_enabled();
+        audio_volume_set_buzzer_enabled(enabled);
+        (void)audio_volume_save_buzzer_enabled(enabled);
+        if (!was_enabled && enabled) {
+            buzzer_play_pattern_force(BUZZER_PATTERN_CONFIRM);
+        }
     }
 }
 
@@ -46,7 +51,7 @@ void ui_menu_volume_populate(lv_obj_t *panel)
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, LV_PART_MAIN);
 
     lv_obj_t *sw = lv_switch_create(row);
-    if (audio_volume_is_muted()) {
+    if (audio_volume_buzzer_enabled()) {
         lv_obj_add_state(sw, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(sw, mute_switch_evt, LV_EVENT_VALUE_CHANGED, NULL);
