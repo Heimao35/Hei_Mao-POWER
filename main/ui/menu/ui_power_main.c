@@ -110,14 +110,21 @@ static float chart_hist_at(const chart_hist_t *h, uint16_t age)
 
 static void chart_hist_window_minmax(const chart_hist_t *h, float *rmin, float *rmax)
 {
-    *rmin = h->buf[0];
-    *rmax = h->buf[0];
-    for (uint16_t i = 1; i < h->count; i++) {
-        if (h->buf[i] < *rmin) {
-            *rmin = h->buf[i];
+    if (h->count == 0) {
+        *rmin = 0.0f;
+        *rmax = 0.0f;
+        return;
+    }
+
+    *rmin = chart_hist_at(h, 0);
+    *rmax = *rmin;
+    for (uint16_t age = 1; age < h->count; age++) {
+        const float v = chart_hist_at(h, age);
+        if (v < *rmin) {
+            *rmin = v;
         }
-        if (h->buf[i] > *rmax) {
-            *rmax = h->buf[i];
+        if (v > *rmax) {
+            *rmax = v;
         }
     }
 }
@@ -179,17 +186,17 @@ static lv_coord_t norm_to_chart(float v, float vmin, float vmax)
 
 static void chart_series_apply(lv_obj_t *chart, lv_chart_series_t *ser, const chart_hist_t *h)
 {
-    if (!chart || !ser || h->count == 0) {
+    if (!chart || !ser) {
         return;
     }
 
     const uint16_t n = CHART_POINT_COUNT;
     for (uint16_t i = 0; i < n; i++) {
         lv_coord_t y = LV_CHART_POINT_NONE;
-        const uint16_t age = (uint16_t)(n - 1 - i);
-        if (age < h->count) {
-            const float raw = chart_hist_at(h, age);
-            y = norm_to_chart(raw, h->disp_min, h->disp_max);
+        if (i < h->count) {
+            const uint16_t age = (uint16_t)(h->count - 1U - i);
+            const float raw  = chart_hist_at(h, age);
+            y                = norm_to_chart(raw, h->disp_min, h->disp_max);
         }
         lv_chart_set_value_by_id(chart, ser, i, y);
     }
@@ -308,8 +315,11 @@ static lv_obj_t *create_chart_view(lv_obj_t *parent)
     lv_chart_set_div_line_count(s_chart, 4, 0);
     lv_obj_set_style_bg_color(s_chart, lv_color_hex(0x1e293b), LV_PART_MAIN);
     lv_obj_set_style_border_width(s_chart, 0, LV_PART_MAIN);
-    lv_obj_set_style_line_color(s_chart, lv_color_hex(0x334155), LV_PART_ITEMS);
+    lv_obj_set_style_line_color(s_chart, lv_color_hex(0x334155), LV_PART_MAIN);
+    lv_obj_set_style_line_width(s_chart, 1, LV_PART_MAIN);
+    lv_obj_set_style_line_color(s_chart, lv_color_hex(0x38BDF8), LV_PART_ITEMS);
     lv_obj_set_style_line_width(s_chart, 2, LV_PART_ITEMS);
+    lv_obj_set_style_line_opa(s_chart, LV_OPA_COVER, LV_PART_ITEMS);
     /* 隐藏转折点圆点，仅绘制折线 */
     lv_obj_set_style_width(s_chart, 0, LV_PART_INDICATOR);
     lv_obj_set_style_height(s_chart, 0, LV_PART_INDICATOR);
@@ -370,6 +380,38 @@ static void chart_update_scale_label(void)
     lv_label_set_text(s_lbl_chart_scale, buf);
 }
 
+static void chart_redraw_from_hist(void)
+{
+    if (s_chart && lv_obj_is_valid(s_chart)) {
+        chart_series_apply(s_chart, s_ser_v, &s_hist_v);
+        chart_series_apply(s_chart, s_ser_i, &s_hist_i);
+        chart_series_apply(s_chart, s_ser_p, &s_hist_p);
+        lv_chart_refresh(s_chart);
+    }
+    chart_update_scale_label();
+}
+
+static void chart_update_legend(const power_meter_reading_t *rd)
+{
+    if (!rd) {
+        return;
+    }
+    char cv_buf[16];
+    char ci_buf[24];
+    char cp_buf[16];
+    power_meter_reading_t tmp = *rd;
+    update_readings(&tmp, cv_buf, sizeof(cv_buf), ci_buf, sizeof(ci_buf), cp_buf, sizeof(cp_buf), true);
+    if (s_lbl_chart_v && lv_obj_is_valid(s_lbl_chart_v)) {
+        lv_label_set_text(s_lbl_chart_v, cv_buf);
+    }
+    if (s_lbl_chart_i && lv_obj_is_valid(s_lbl_chart_i)) {
+        lv_label_set_text(s_lbl_chart_i, ci_buf);
+    }
+    if (s_lbl_chart_p && lv_obj_is_valid(s_lbl_chart_p)) {
+        lv_label_set_text(s_lbl_chart_p, cp_buf);
+    }
+}
+
 static void chart_push_sample(float v, float i, float p)
 {
     chart_hist_push(&s_hist_v, v);
@@ -380,13 +422,7 @@ static void chart_push_sample(float v, float i, float p)
     chart_hist_update_tier(&s_hist_i, s_span_i, (uint8_t)(sizeof(s_span_i) / sizeof(s_span_i[0])));
     chart_hist_update_tier(&s_hist_p, s_span_p, (uint8_t)(sizeof(s_span_p) / sizeof(s_span_p[0])));
 
-    if (s_chart && lv_obj_is_valid(s_chart)) {
-        chart_series_apply(s_chart, s_ser_v, &s_hist_v);
-        chart_series_apply(s_chart, s_ser_i, &s_hist_i);
-        chart_series_apply(s_chart, s_ser_p, &s_hist_p);
-        lv_chart_refresh(s_chart);
-    }
-    chart_update_scale_label();
+    chart_redraw_from_hist();
 }
 
 void ui_power_main_create(lv_obj_t *parent)
@@ -425,9 +461,7 @@ void ui_power_main_set_mode(ui_power_view_mode_t mode)
     if (mode >= UI_POWER_VIEW_COUNT) {
         return;
     }
-    if (mode == UI_POWER_VIEW_CHART && s_mode != UI_POWER_VIEW_CHART) {
-        chart_hist_reset_all();
-    }
+    const bool entering_chart = (mode == UI_POWER_VIEW_CHART && s_mode != UI_POWER_VIEW_CHART);
     s_mode = mode;
     if (mode == UI_POWER_VIEW_NUMERIC) {
         lv_obj_clear_flag(s_numeric_root, LV_OBJ_FLAG_HIDDEN);
@@ -437,6 +471,13 @@ void ui_power_main_set_mode(ui_power_view_mode_t mode)
         lv_obj_clear_flag(s_chart_root, LV_OBJ_FLAG_HIDDEN);
     }
     ui_power_main_reset_views();
+    if (entering_chart) {
+        power_meter_reading_t rd = {0};
+        if (power_meter_read(&rd) == ESP_OK) {
+            chart_update_legend(&rd);
+        }
+        chart_redraw_from_hist();
+    }
 }
 
 lv_obj_t *ui_power_main_get_numeric_view(void)
@@ -459,11 +500,7 @@ void ui_power_main_refresh(void)
     char v_buf[16];
     char i_buf[24];
     char p_buf[16];
-    char cv_buf[16];
-    char ci_buf[24];
-    char cp_buf[16];
     update_readings(&rd, v_buf, sizeof(v_buf), i_buf, sizeof(i_buf), p_buf, sizeof(p_buf), false);
-    update_readings(&rd, cv_buf, sizeof(cv_buf), ci_buf, sizeof(ci_buf), cp_buf, sizeof(cp_buf), true);
 
     if (s_lbl_voltage && lv_obj_is_valid(s_lbl_voltage)) {
         lv_label_set_text(s_lbl_voltage, v_buf);
@@ -480,13 +517,7 @@ void ui_power_main_refresh(void)
     }
 
     if (s_lbl_chart_v && lv_obj_is_valid(s_lbl_chart_v)) {
-        lv_label_set_text(s_lbl_chart_v, cv_buf);
-    }
-    if (s_lbl_chart_i && lv_obj_is_valid(s_lbl_chart_i)) {
-        lv_label_set_text(s_lbl_chart_i, ci_buf);
-    }
-    if (s_lbl_chart_p && lv_obj_is_valid(s_lbl_chart_p)) {
-        lv_label_set_text(s_lbl_chart_p, cp_buf);
+        chart_update_legend(&rd);
     }
 
     const float i_abs = fabsf(rd.current_a);
