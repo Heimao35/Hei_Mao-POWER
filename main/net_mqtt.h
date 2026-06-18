@@ -29,6 +29,12 @@ extern "C" {
 /** 在 net_wifi_init() 之后调用，启动 MQTT 后台任务。 */
 void net_mqtt_init(void);
 
+/** Wi-Fi 扫描/换网期间暂停 MQTT，释放射频与 TCP（由 net_wifi 调用）。 */
+void net_mqtt_suspend(void);
+
+/** 恢复 MQTT 连接（由 net_wifi 调用）。 */
+void net_mqtt_resume(void);
+
 #ifdef __cplusplus
 }
 #endif

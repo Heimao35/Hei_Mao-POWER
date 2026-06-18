@@ -22,6 +22,7 @@ list(APPEND srcs
     "audio_volume.c"
     "buzzer.c"
     "net_mqtt.c"
+    "rtos_psram.c"
 )
 list(REMOVE_DUPLICATES srcs)
 

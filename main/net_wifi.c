@@ -2,6 +2,8 @@
  * @file net_wifi.c
  */
 #include "net_wifi.h"
+#include "net_mqtt.h"
+#include "rtos_psram.h"
 
 #include "esp_check.h"
 #include "esp_event.h"
@@ -9,6 +11,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs.h"
@@ -32,6 +35,16 @@ static SemaphoreHandle_t s_wifi_conn_mx;
 #define NET_WIFI_BOOT_RECONNECT_DELAY_MS  3000U
 #define NET_WIFI_BOOT_TASK_STACK          4096U
 #define NET_WIFI_BOOT_TASK_PRIO           1
+#define WIFI_SCAN_WORKER_STACK            5120U
+#define WIFI_SCAN_QUEUE_LEN               2U
+#define WIFI_CONN_WORKER_STACK            8192U
+#define WIFI_CONN_QUEUE_LEN               1U
+
+static QueueHandle_t     s_scan_queue;
+static TaskHandle_t      s_scan_worker;
+static QueueHandle_t     s_conn_queue;
+static TaskHandle_t      s_conn_worker;
+static TaskHandle_t      s_boot_worker;
 
 typedef struct {
     net_wifi_scan_cb_t    cb;
@@ -128,19 +141,34 @@ static int cmp_rssi_desc(const void *a, const void *b)
     return 0;
 }
 
-static void scan_task(void *arg)
+static void scan_run_job(scan_job_t *job)
 {
-    scan_job_t *job = (scan_job_t *)arg;
     if (!job) {
-        vTaskDelete(NULL);
         return;
     }
     job->err = ESP_FAIL;
     job->n   = 0;
     if (!s_wifi_started) {
         job->err = ESP_ERR_INVALID_STATE;
+        ESP_LOGW(TAG, "scan: wifi not started");
         goto finish;
     }
+
+    ESP_LOGI(TAG, "scan: start");
+    net_mqtt_suspend();
+
+    bool mx_held = false;
+    if (s_wifi_conn_mx) {
+        if (xSemaphoreTake(s_wifi_conn_mx, pdMS_TO_TICKS(15000)) != pdTRUE) {
+            job->err = ESP_ERR_TIMEOUT;
+            ESP_LOGW(TAG, "scan: radio mutex timeout");
+            goto scan_finish;
+        }
+        mx_held = true;
+    }
+
+    esp_wifi_scan_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     wifi_scan_config_t sc = {
         .ssid        = NULL,
@@ -152,10 +180,14 @@ static void scan_task(void *arg)
         .scan_time.active.max = 300,
     };
     esp_err_t e = esp_wifi_scan_start(&sc, true);
+    if (e == ESP_ERR_WIFI_STATE) {
+        vTaskDelay(pdMS_TO_TICKS(300));
+        e = esp_wifi_scan_start(&sc, true);
+    }
     if (e != ESP_OK) {
         job->err = e;
         ESP_LOGW(TAG, "scan_start: %s", esp_err_to_name(e));
-        goto finish;
+        goto scan_finish;
     }
 
     uint16_t total = 0;
@@ -168,20 +200,21 @@ static void scan_task(void *arg)
         job->n   = 0;
         job->err = ESP_OK;
         ESP_LOGI(TAG, "scan: 0 APs");
-        goto finish;
+        goto scan_finish;
     }
 
     wifi_ap_record_t *rec = (wifi_ap_record_t *)calloc(getn, sizeof(wifi_ap_record_t));
     if (!rec) {
         job->err = ESP_ERR_NO_MEM;
-        goto finish;
+        ESP_LOGW(TAG, "scan: no mem for AP records");
+        goto scan_finish;
     }
     e = esp_wifi_scan_get_ap_records(&getn, rec);
     if (e != ESP_OK) {
         job->err = e;
         ESP_LOGW(TAG, "get_ap_records: %s", esp_err_to_name(e));
         free(rec);
-        goto finish;
+        goto scan_finish;
     }
     qsort(rec, getn, sizeof(rec[0]), cmp_rssi_desc);
     int n = (int)getn;
@@ -198,30 +231,78 @@ static void scan_task(void *arg)
     }
     free(rec);
     job->err = ESP_OK;
+    ESP_LOGI(TAG, "scan: %d APs", job->n);
+
+scan_finish:
+    if (mx_held && s_wifi_conn_mx) {
+        xSemaphoreGive(s_wifi_conn_mx);
+    }
+    net_mqtt_resume();
 
 finish:
     if (lv_async_call(scan_deliver_cb, job) != LV_RES_OK) {
+        ESP_LOGW(TAG, "scan: lv_async_call failed");
         free(job);
     }
-    vTaskDelete(NULL);
+}
+
+static void wifi_scan_worker(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        scan_job_t *job = NULL;
+        if (xQueueReceive(s_scan_queue, &job, portMAX_DELAY) != pdTRUE || !job) {
+            continue;
+        }
+        scan_run_job(job);
+    }
+}
+
+static bool wifi_scan_worker_start(void)
+{
+    if (s_scan_worker) {
+        return true;
+    }
+    s_scan_queue = xQueueCreate(WIFI_SCAN_QUEUE_LEN, sizeof(scan_job_t *));
+    if (!s_scan_queue) {
+        ESP_LOGE(TAG, "scan queue create failed");
+        return false;
+    }
+
+    s_scan_worker = rtos_task_create_psram(wifi_scan_worker, "wifi_scan", WIFI_SCAN_WORKER_STACK, NULL, 5);
+    if (!s_scan_worker) {
+        vQueueDelete(s_scan_queue);
+        s_scan_queue = NULL;
+        return false;
+    }
+    ESP_LOGI(TAG, "scan worker ready");
+    return true;
 }
 
 void net_wifi_scan_request(net_wifi_scan_cb_t cb, void *user_data)
 {
     if (!cb || !s_wifi_started) {
+        ESP_LOGW(TAG, "scan_request: invalid state");
         if (cb) {
             cb(ESP_ERR_INVALID_STATE, NULL, 0, user_data);
         }
         return;
     }
+    if (!s_scan_queue || !s_scan_worker) {
+        ESP_LOGE(TAG, "scan_request: worker not ready");
+        cb(ESP_ERR_INVALID_STATE, NULL, 0, user_data);
+        return;
+    }
     scan_job_t *job = (scan_job_t *)calloc(1, sizeof(*job));
     if (!job) {
+        ESP_LOGE(TAG, "scan_request: no mem for job");
         cb(ESP_ERR_NO_MEM, NULL, 0, user_data);
         return;
     }
     job->cb = cb;
     job->ud = user_data;
-    if (xTaskCreate(scan_task, "wifi_scan", 6144, job, 5, NULL) != pdPASS) {
+    if (xQueueSend(s_scan_queue, &job, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "scan_request: queue full");
         free(job);
         cb(ESP_ERR_NO_MEM, NULL, 0, user_data);
     }
@@ -251,11 +332,9 @@ static void conn_deliver_work_cb(void *p)
     free(job);
 }
 
-static void connect_work_task(void *arg)
+static void conn_run_job(conn_work_t *job)
 {
-    conn_work_t *job = (conn_work_t *)arg;
     if (!job) {
-        vTaskDelete(NULL);
         return;
     }
     job->ok = false;
@@ -263,8 +342,14 @@ static void connect_work_task(void *arg)
     if (!s_wifi_started) {
         goto finish;
     }
+
+    net_mqtt_suspend();
+
     if (s_wifi_conn_mx) {
-        xSemaphoreTake(s_wifi_conn_mx, portMAX_DELAY);
+        if (xSemaphoreTake(s_wifi_conn_mx, pdMS_TO_TICKS(15000)) != pdTRUE) {
+            ESP_LOGW(TAG, "connect: radio mutex timeout");
+            goto finish;
+        }
         mx_held = true;
     }
 
@@ -312,10 +397,44 @@ finish:
     if (mx_held && s_wifi_conn_mx) {
         xSemaphoreGive(s_wifi_conn_mx);
     }
+    net_mqtt_resume();
     if (lv_async_call(conn_deliver_work_cb, job) != LV_RES_OK) {
+        ESP_LOGW(TAG, "connect: lv_async_call failed");
         free(job);
     }
-    vTaskDelete(NULL);
+}
+
+static void wifi_conn_worker(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        conn_work_t *job = NULL;
+        if (xQueueReceive(s_conn_queue, &job, portMAX_DELAY) != pdTRUE || !job) {
+            continue;
+        }
+        conn_run_job(job);
+    }
+}
+
+static bool wifi_conn_worker_start(void)
+{
+    if (s_conn_worker) {
+        return true;
+    }
+    s_conn_queue = xQueueCreate(WIFI_CONN_QUEUE_LEN, sizeof(conn_work_t *));
+    if (!s_conn_queue) {
+        ESP_LOGE(TAG, "conn queue create failed");
+        return false;
+    }
+
+    s_conn_worker = rtos_task_create_psram(wifi_conn_worker, "wifi_conn", WIFI_CONN_WORKER_STACK, NULL, 5);
+    if (!s_conn_worker) {
+        vQueueDelete(s_conn_queue);
+        s_conn_queue = NULL;
+        return false;
+    }
+    ESP_LOGI(TAG, "conn worker ready");
+    return true;
 }
 
 void net_wifi_connect_request(const char *ssid, const char *password, net_wifi_connect_cb_t cb, void *user_data)
@@ -326,8 +445,14 @@ void net_wifi_connect_request(const char *ssid, const char *password, net_wifi_c
         }
         return;
     }
+    if (!s_conn_queue || !s_conn_worker) {
+        ESP_LOGE(TAG, "connect_request: worker not ready");
+        cb(false, user_data);
+        return;
+    }
     conn_work_t *job = (conn_work_t *)calloc(1, sizeof(*job));
     if (!job) {
+        ESP_LOGE(TAG, "connect_request: no mem for job");
         cb(false, user_data);
         return;
     }
@@ -339,7 +464,8 @@ void net_wifi_connect_request(const char *ssid, const char *password, net_wifi_c
         strncpy(job->pass, password, sizeof(job->pass) - 1);
         job->pass[sizeof(job->pass) - 1] = '\0';
     }
-    if (xTaskCreate(connect_work_task, "wifi_conn", 8192, job, 5, NULL) != pdPASS) {
+    if (xQueueSend(s_conn_queue, &job, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "connect_request: queue full");
         free(job);
         cb(false, user_data);
     }
@@ -398,8 +524,12 @@ void net_wifi_start_saved_reconnect_background(void)
     if (s_boot_task_created) {
         return;
     }
-    if (xTaskCreate(wifi_boot_reconnect_task, "wifi_boot_sta", NET_WIFI_BOOT_TASK_STACK, NULL, NET_WIFI_BOOT_TASK_PRIO,
-                    NULL) != pdPASS) {
+    s_boot_worker = rtos_task_create_psram(wifi_boot_reconnect_task,
+                                           "wifi_boot_sta",
+                                           NET_WIFI_BOOT_TASK_STACK,
+                                           NULL,
+                                           NET_WIFI_BOOT_TASK_PRIO);
+    if (!s_boot_worker) {
         ESP_LOGW(TAG, "wifi_boot_sta task failed, trying saved STA inline");
         net_wifi_boot_try_saved();
         return;
@@ -442,5 +572,11 @@ void net_wifi_init(void)
     ESP_ERROR_CHECK(esp_wifi_start());
     s_wifi_started = true;
     s_wifi_conn_mx = xSemaphoreCreateMutex();
+    if (!wifi_scan_worker_start()) {
+        ESP_LOGE(TAG, "wifi scan worker init failed");
+    }
+    if (!wifi_conn_worker_start()) {
+        ESP_LOGE(TAG, "wifi conn worker init failed");
+    }
     ESP_LOGI(TAG, "wifi sta ready");
 }

@@ -8,6 +8,7 @@
 #include "pd_spoof.h"
 #include "ui_pd_panel.h"
 #include "ui_status_bar.h"
+#include "rtos_psram.h"
 
 #include "mqtt_client.h"
 #include "esp_log.h"
@@ -22,10 +23,15 @@
 
 static const char *TAG = "net_mqtt";
 
+#define NET_MQTT_TASK_STACK  6144U
+
+static TaskHandle_t s_mqtt_task;
+
 static esp_mqtt_client_handle_t s_client;
 static char s_cmd_topic[64];
 static char s_telem_topic[64];
 static volatile bool s_mqtt_connected;
+static volatile bool s_mqtt_suspended;
 
 static void mqtt_ui_sync_async(void *user_data)
 {
@@ -294,6 +300,10 @@ static void net_mqtt_task(void *arg)
     }
 
     for (;;) {
+        if (s_mqtt_suspended) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
         if (!net_wifi_sta_has_ip()) {
             s_mqtt_connected = false;
             vTaskDelay(pdMS_TO_TICKS(1000));
@@ -313,7 +323,34 @@ void net_mqtt_init(void)
     snprintf(s_cmd_topic, sizeof(s_cmd_topic), "power/%s/command", NET_MQTT_DEVICE_ID);
     snprintf(s_telem_topic, sizeof(s_telem_topic), "power/%s/telemetry", NET_MQTT_DEVICE_ID);
 
-    if (xTaskCreate(net_mqtt_task, "net_mqtt", 6144, NULL, 1, NULL) != pdPASS) {
+    s_mqtt_task = rtos_task_create_psram(net_mqtt_task, "net_mqtt", NET_MQTT_TASK_STACK, NULL, 1);
+    if (!s_mqtt_task) {
         ESP_LOGE(TAG, "创建 MQTT 任务失败");
+    }
+}
+
+void net_mqtt_suspend(void)
+{
+    s_mqtt_suspended  = true;
+    s_mqtt_connected  = false;
+    if (s_client) {
+        esp_mqtt_client_stop(s_client);
+        ESP_LOGI(TAG, "MQTT 已暂停（Wi-Fi 操作）");
+    }
+}
+
+void net_mqtt_resume(void)
+{
+    if (!s_mqtt_suspended) {
+        return;
+    }
+    s_mqtt_suspended = false;
+    if (s_client && net_wifi_sta_has_ip()) {
+        esp_err_t err = esp_mqtt_client_start(s_client);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "MQTT 恢复失败: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(TAG, "MQTT 已恢复");
+        }
     }
 }
