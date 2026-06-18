@@ -41,10 +41,16 @@ static char s_telem_topic[64];
 static volatile bool s_mqtt_connected;
 static volatile bool s_mqtt_suspended;
 static volatile bool s_mqtt_reset_pending;
+static bool          s_mqtt_bar_on;
 
 static void mqtt_sync_status_bar(void)
 {
-    ui_status_bar_sync_mqtt(s_mqtt_connected);
+    const bool on = s_mqtt_connected;
+    if (on == s_mqtt_bar_on) {
+        return;
+    }
+    s_mqtt_bar_on = on;
+    ui_status_bar_sync_mqtt(on);
 }
 
 bool net_mqtt_is_connected(void)
@@ -301,6 +307,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         mqtt_sync_status_bar();
         break;
     case MQTT_EVENT_ERROR:
+        s_mqtt_connected = false;
+        mqtt_sync_status_bar();
         if (event->error_handle &&
             event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
             ESP_LOGW(TAG, "Broker 拒绝 MQTT 连接 (code=%d)，将重置客户端",
@@ -451,10 +459,15 @@ static void net_mqtt_task(void *arg)
             continue;
         }
         if (!net_wifi_sta_has_ip()) {
-            s_mqtt_connected = false;
-            mqtt_sync_status_bar();
+            if (s_mqtt_connected) {
+                s_mqtt_connected = false;
+                mqtt_sync_status_bar();
+            }
             (void)net_wifi_wait_sta_ip(pdMS_TO_TICKS(200));
             continue;
+        }
+        if (!s_mqtt_connected && s_mqtt_bar_on) {
+            mqtt_sync_status_bar();
         }
         if (!s_client) {
             wait_for_broker_tcp(broker_host, broker_port);

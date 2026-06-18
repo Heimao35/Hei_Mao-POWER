@@ -189,8 +189,10 @@ static void mqtt_vis_apply(void *p)
     if (!m) {
         return;
     }
+    /* 应用时读取实时状态，避免异步队列中过期的 show=true 覆盖断开后的隐藏 */
+    const bool show = net_mqtt_is_connected() && net_wifi_sta_has_ip();
     if (s_mqtt_lbl && lv_obj_is_valid(s_mqtt_lbl)) {
-        if (m->show) {
+        if (show) {
             lv_label_set_text(s_mqtt_lbl, LV_SYMBOL_DRIVE);
             lv_obj_clear_flag(s_mqtt_lbl, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -199,6 +201,9 @@ static void mqtt_vis_apply(void *p)
         }
     }
     status_bar_relayout();
+    if (!show) {
+        status_bar_invalidate_top_strip();
+    }
     lv_mem_free(m);
 }
 
@@ -260,6 +265,7 @@ static void on_wifi_event(void *arg, esp_event_base_t event_base, int32_t event_
     (void)event_data;
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         post_wifi_visible(false);
+        post_mqtt_visible(false);
     }
 }
 
