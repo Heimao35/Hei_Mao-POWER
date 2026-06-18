@@ -40,6 +40,7 @@
 #include "ui/menu/ui_boot_splash.h"
 
 #include "net_wifi.h"
+#include "net_mqtt.h"
 
 #include "display_brightness.h"
 
@@ -716,6 +717,8 @@ void app_main(void)
     net_wifi_init();
 
     net_wifi_start_saved_reconnect_background();
+
+    net_mqtt_init();
 
 
 

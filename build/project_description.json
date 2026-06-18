@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "Opal",
-    "project_version":    "718cfac-dirty",
+    "project_version":    "1de7f49-dirty",
     "project_path":       "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL",
     "idf_path":           "D:/ban gong/espidf/v5.4.3/esp-idf",
     "build_dir":          "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build",
@@ -1296,11 +1296,11 @@
             "type": "LIBRARY",
             "lib": "__idf_main",
             "reqs": [],
-            "priv_reqs": [ "nvs_flash", "esp_wifi", "esp_netif", "esp_event", "esp_lcd", "esp_timer", "esp_driver_ledc", "driver", "lvgl__lvgl", "esp_lcd_co5300", "esp_lcd_touch_cst820", "esp_lcd_sh8601" ],
+            "priv_reqs": [ "nvs_flash", "esp_wifi", "esp_netif", "esp_event", "esp_lcd", "esp_timer", "esp_driver_ledc", "driver", "lvgl__lvgl", "esp_lcd_co5300", "esp_lcd_touch_cst820", "esp_lcd_sh8601", "mqtt", "json" ],
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "file": "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build/esp-idf/main/libmain.a",
-            "sources": [ "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/audio_volume.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/buzzer.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/display_brightness.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/i2c_bus_share.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ina236.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/main.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/net_wifi.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/pd_spoof.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/power_meter.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/generated/images/_262_alpha_460x460.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/generated/images/_268_alpha_460x460.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/generated/images/_307_alpha_460x460.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/generated/images/_bnj_2_alpha_378x458.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_boot_splash.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_menu_brightness.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_menu_volume.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_menu_wifi.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_pd_panel.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_power_app.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_power_main.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_power_sheet.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_status_bar.c" ],
+            "sources": [ "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/audio_volume.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/buzzer.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/display_brightness.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/i2c_bus_share.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ina236.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/main.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/net_mqtt.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/net_wifi.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/pd_spoof.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/power_meter.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/generated/images/_262_alpha_460x460.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/generated/images/_268_alpha_460x460.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/generated/images/_307_alpha_460x460.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/generated/images/_bnj_2_alpha_378x458.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_boot_splash.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_menu_brightness.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_menu_volume.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_menu_wifi.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_pd_panel.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_power_app.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_power_main.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_power_sheet.c", "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main/ui/menu/ui_status_bar.c" ],
             "include_dirs": [ ".", "ui/menu" ]
         },
         "mbedtls": {
@@ -2962,7 +2962,7 @@
             "dir": "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/main",
             "lib": "__idf_main",
             "reqs": [],
-            "priv_reqs": [ "nvs_flash", "esp_wifi", "esp_netif", "esp_event", "esp_lcd", "esp_timer", "esp_driver_ledc", "driver", "lvgl__lvgl", "esp_lcd_co5300", "esp_lcd_touch_cst820", "esp_lcd_sh8601" ],
+            "priv_reqs": [ "nvs_flash", "esp_wifi", "esp_netif", "esp_event", "esp_lcd", "esp_timer", "esp_driver_ledc", "driver", "lvgl__lvgl", "esp_lcd_co5300", "esp_lcd_touch_cst820", "esp_lcd_sh8601", "mqtt", "json" ],
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "include_dirs": [ ".", "ui/menu" ]

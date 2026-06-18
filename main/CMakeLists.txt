@@ -21,6 +21,7 @@ list(APPEND srcs
     "pd_spoof.c"
     "audio_volume.c"
     "buzzer.c"
+    "net_mqtt.c"
 )
 list(REMOVE_DUPLICATES srcs)
 
@@ -45,6 +46,8 @@ idf_component_register(
         esp_lcd_co5300
         esp_lcd_touch_cst820
         esp_lcd_sh8601
+        mqtt
+        json
     )
 
 add_compile_definitions(LV_LVGL_H_INCLUDE_SIMPLE)
