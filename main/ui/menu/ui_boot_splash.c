@@ -9,6 +9,7 @@
 #include "ui_power_app.h"
 #include "ui_power_config.h"
 #include "ui_status_bar.h"
+#include "buzzer.h"
 
 #include "lvgl.h"
 
@@ -318,6 +319,8 @@ void ui_boot_splash_play(void)
 
     logo_col_place_arc_center(logo_col, arc, s_boot.subtitle, bar, scr_w, scr_h);
     lv_obj_update_layout(panel);
+
+    buzzer_play_boot_melody();
 
     lv_anim_t kick;
     lv_anim_init(&kick);
