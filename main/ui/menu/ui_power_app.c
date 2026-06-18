@@ -544,19 +544,23 @@ static void pd_async_handler(void *p)
         return;
     }
     bool animate_sw = false;
+    const bool notify_ui = msg->evt.from_button || msg->evt.from_remote;
     if (msg->evt.id == PD_SPOOF_EVT_TOGGLED) {
-        animate_sw = msg->evt.from_button || !msg->evt.enabled;
+        animate_sw = notify_ui || !msg->evt.enabled;
     } else if (msg->evt.id == PD_SPOOF_EVT_VOLTAGE && !msg->evt.enabled) {
         animate_sw = true;
     }
     ui_pd_panel_sync_from_driver_ex(animate_sw);
     if (msg->evt.id == PD_SPOOF_EVT_TOGGLED) {
-        ui_status_bar_sync_pd(msg->evt.enabled);
-        if (msg->evt.from_button && !ui_power_sheet_bottom_is_open()) {
+        pd_spoof_status_t st = {0};
+        if (pd_spoof_get_status(&st) == ESP_OK) {
+            ui_status_bar_sync_pd(st.enabled);
+        } else {
+            ui_status_bar_sync_pd(msg->evt.enabled);
+        }
+        if (notify_ui && !ui_power_sheet_bottom_is_open()) {
             ui_pd_panel_show_toggle_toast(msg->evt.enabled);
         }
-    } else if (msg->evt.id == PD_SPOOF_EVT_VOLTAGE && !msg->evt.enabled) {
-        ui_status_bar_sync_pd(false);
     }
     lv_mem_free(msg);
 }

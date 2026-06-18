@@ -6,40 +6,135 @@
 #include "net_wifi.h"
 #include "power_meter.h"
 #include "pd_spoof.h"
-#include "ui_pd_panel.h"
-#include "ui_status_bar.h"
 #include "rtos_psram.h"
 
 #include "mqtt_client.h"
 #include "esp_log.h"
+#include "ui_status_bar.h"
 #include "cJSON.h"
-#include "lvgl.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "lwip/sockets.h"
+#include "esp_random.h"
+
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 static const char *TAG = "net_mqtt";
 
-#define NET_MQTT_TASK_STACK  6144U
+#define NET_MQTT_TASK_STACK      6144U
+#define NET_MQTT_TASK_PRIO       4
+#define NET_MQTT_RECONNECT_MS    1000
+#define NET_MQTT_NETWORK_MS      4000
+#define NET_MQTT_IP_SETTLE_MS    200U
+#define NET_MQTT_BROKER_POLL_MS  400U
 
 static TaskHandle_t s_mqtt_task;
 
 static esp_mqtt_client_handle_t s_client;
+static char s_client_id[40];
 static char s_cmd_topic[64];
 static char s_telem_topic[64];
 static volatile bool s_mqtt_connected;
 static volatile bool s_mqtt_suspended;
+static volatile bool s_mqtt_reset_pending;
 
-static void mqtt_ui_sync_async(void *user_data)
+static void mqtt_sync_status_bar(void)
 {
-    (void)user_data;
-    ui_pd_panel_sync_from_driver_ex(false);
-    pd_spoof_status_t st = {0};
-    if (pd_spoof_get_status(&st) == ESP_OK) {
-        ui_status_bar_sync_pd(st.enabled);
+    ui_status_bar_sync_mqtt(s_mqtt_connected);
+}
+
+bool net_mqtt_is_connected(void)
+{
+    return s_mqtt_connected;
+}
+
+static bool parse_broker_endpoint(char *host, size_t host_sz, uint16_t *port)
+{
+    if (!host || !port) {
+        return false;
+    }
+    const char *uri = NET_MQTT_BROKER_URI;
+    if (strncmp(uri, "mqtt://", 7) != 0) {
+        return false;
+    }
+    uri += 7;
+    const char *colon = strrchr(uri, ':');
+    if (!colon || colon == uri) {
+        return false;
+    }
+    const size_t len = (size_t)(colon - uri);
+    if (len >= host_sz) {
+        return false;
+    }
+    memcpy(host, uri, len);
+    host[len] = '\0';
+    *port = (uint16_t)atoi(colon + 1);
+    return (*port > 0);
+}
+
+static bool broker_tcp_port_open(const char *host, uint16_t port, int timeout_ms)
+{
+    if (!host || host[0] == '\0' || port == 0) {
+        return false;
+    }
+
+    struct sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_port   = htons(port);
+    if (inet_pton(AF_INET, host, &addr.sin_addr) != 1) {
+        return false;
+    }
+
+    const int sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0) {
+        return false;
+    }
+
+    struct timeval tv = {
+        .tv_sec  = timeout_ms / 1000,
+        .tv_usec = (timeout_ms % 1000) * 1000,
+    };
+    (void)setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    (void)setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    const bool ok = (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0);
+    close(sock);
+    return ok;
+}
+
+static void mqtt_client_destroy(void)
+{
+    if (!s_client) {
+        return;
+    }
+    esp_mqtt_client_handle_t client = s_client;
+    s_client = NULL;
+    s_mqtt_connected = false;
+    mqtt_sync_status_bar();
+    (void)esp_mqtt_client_stop(client);
+    (void)esp_mqtt_client_destroy(client);
+}
+
+static void wait_for_broker_tcp(const char *host, uint16_t port)
+{
+    if (broker_tcp_port_open(host, port, 800)) {
+        return;
+    }
+    ESP_LOGI(TAG, "等待 Broker %s:%u 就绪...", host, (unsigned)port);
+    while (!s_mqtt_suspended) {
+        if (!net_wifi_sta_has_ip()) {
+            (void)net_wifi_wait_sta_ip(pdMS_TO_TICKS(200));
+            continue;
+        }
+        if (broker_tcp_port_open(host, port, 800)) {
+            ESP_LOGI(TAG, "Broker %s:%u 已就绪", host, (unsigned)port);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(NET_MQTT_BROKER_POLL_MS));
     }
 }
 
@@ -108,32 +203,53 @@ static esp_err_t apply_remote_command(cJSON *root)
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* 先关 → 改档位 → 再开，避免“改电压时 PD 已关但命令末尾又打开”的时序问题 */
-    if (has_enabled && !pd_enabled) {
-        err = pd_spoof_set_enabled(false);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "关闭 PD 失败: %s", esp_err_to_name(err));
-            return err;
+    pd_spoof_status_t cur = {0};
+    if (pd_spoof_get_status(&cur) != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const bool vol_change = has_voltage && (int)cur.selected_voltage != pd_voltage;
+    const bool keep_on_change_v = has_enabled && pd_enabled && vol_change;
+
+    if (keep_on_change_v) {
+        /* PD 保持开启时切换档位：静默关→预选→再开，只发一次 UI 事件，避免状态栏被中间态清掉 */
+        err = pd_spoof_set_enabled_quiet(false);
+        if (err == ESP_OK) {
+            err = pd_spoof_preset_voltage(voltage_from_int(pd_voltage));
+        }
+        if (err == ESP_OK) {
+            err = pd_spoof_set_enabled_remote(true);
+        }
+    } else {
+        if (has_enabled && !pd_enabled) {
+            err = pd_spoof_set_enabled_remote(false);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "关闭 PD 失败: %s", esp_err_to_name(err));
+                return err;
+            }
+        }
+
+        if (has_voltage) {
+            err = pd_spoof_select_voltage(voltage_from_int(pd_voltage));
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "设置 PD 电压失败: %s", esp_err_to_name(err));
+                return err;
+            }
+        }
+
+        if (has_enabled && pd_enabled) {
+            err = pd_spoof_set_enabled_remote(true);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "开启 PD 失败: %s", esp_err_to_name(err));
+                return err;
+            }
         }
     }
 
-    if (has_voltage) {
-        err = pd_spoof_select_voltage(voltage_from_int(pd_voltage));
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "设置 PD 电压失败: %s", esp_err_to_name(err));
-            return err;
-        }
+    if (err != ESP_OK) {
+        return err;
     }
 
-    if (has_enabled && pd_enabled) {
-        err = pd_spoof_set_enabled(true);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "开启 PD 失败: %s", esp_err_to_name(err));
-            return err;
-        }
-    }
-
-    lv_async_call(mqtt_ui_sync_async, NULL);
     ESP_LOGI(TAG, "已应用远程命令 enabled=%d voltage=%d",
              has_enabled ? (int)pd_enabled : -1,
              has_voltage ? pd_voltage : -1);
@@ -177,10 +293,20 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         s_mqtt_connected = true;
         ESP_LOGI(TAG, "MQTT 已连接，订阅 %s", s_cmd_topic);
         esp_mqtt_client_subscribe(s_client, s_cmd_topic, 0);
+        mqtt_sync_status_bar();
         break;
     case MQTT_EVENT_DISCONNECTED:
         s_mqtt_connected = false;
         ESP_LOGW(TAG, "MQTT 已断开");
+        mqtt_sync_status_bar();
+        break;
+    case MQTT_EVENT_ERROR:
+        if (event->error_handle &&
+            event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
+            ESP_LOGW(TAG, "Broker 拒绝 MQTT 连接 (code=%d)，将重置客户端",
+                     event->error_handle->connect_return_code);
+            s_mqtt_reset_pending = true;
+        }
         break;
     case MQTT_EVENT_DATA:
         if (event->topic_len <= 0 || event->data_len <= 0) {
@@ -249,9 +375,11 @@ static bool mqtt_client_start_once(void)
 
     esp_mqtt_client_config_t cfg = {
         .broker.address.uri = NET_MQTT_BROKER_URI,
-        .credentials.client_id = NET_MQTT_DEVICE_ID,
-        .network.reconnect_timeout_ms = 5000,
+        .credentials.client_id = s_client_id,
+        .network.reconnect_timeout_ms = NET_MQTT_RECONNECT_MS,
+        .network.timeout_ms = NET_MQTT_NETWORK_MS,
         .session.keepalive = 30,
+        .session.disable_clean_session = false,
     };
 
     s_client = esp_mqtt_client_init(&cfg);
@@ -284,34 +412,54 @@ static void net_mqtt_task(void *arg)
 {
     (void)arg;
 
-    while (!net_wifi_sta_has_ip()) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    char broker_host[64];
+    uint16_t broker_port = 0;
+    if (!parse_broker_endpoint(broker_host, sizeof(broker_host), &broker_port)) {
+        ESP_LOGE(TAG, "Broker URI 无效: %s", NET_MQTT_BROKER_URI);
+        vTaskDelete(NULL);
+        return;
     }
 
+    while (!net_wifi_sta_has_ip()) {
+        (void)net_wifi_wait_sta_ip(pdMS_TO_TICKS(200));
+    }
+    vTaskDelay(pdMS_TO_TICKS(NET_MQTT_IP_SETTLE_MS));
+
     ESP_LOGI(TAG, "Wi-Fi 已就绪，连接 MQTT Broker");
+    wait_for_broker_tcp(broker_host, broker_port);
 
     while (!mqtt_client_start_once()) {
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        vTaskDelay(pdMS_TO_TICKS(NET_MQTT_BROKER_POLL_MS));
         if (!net_wifi_sta_has_ip()) {
             while (!net_wifi_sta_has_ip()) {
-                vTaskDelay(pdMS_TO_TICKS(1000));
+                (void)net_wifi_wait_sta_ip(pdMS_TO_TICKS(200));
             }
+            vTaskDelay(pdMS_TO_TICKS(NET_MQTT_IP_SETTLE_MS));
         }
+        wait_for_broker_tcp(broker_host, broker_port);
     }
 
     for (;;) {
+        if (s_mqtt_reset_pending) {
+            s_mqtt_reset_pending = false;
+            mqtt_client_destroy();
+            wait_for_broker_tcp(broker_host, broker_port);
+            (void)mqtt_client_start_once();
+        }
         if (s_mqtt_suspended) {
-            vTaskDelay(pdMS_TO_TICKS(500));
+            vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
         if (!net_wifi_sta_has_ip()) {
             s_mqtt_connected = false;
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            mqtt_sync_status_bar();
+            (void)net_wifi_wait_sta_ip(pdMS_TO_TICKS(200));
             continue;
         }
         if (!s_client) {
+            wait_for_broker_tcp(broker_host, broker_port);
             (void)mqtt_client_start_once();
-        } else {
+        } else if (s_mqtt_connected) {
             (void)publish_telemetry();
         }
         vTaskDelay(pdMS_TO_TICKS(NET_MQTT_TELEMETRY_INTERVAL_MS));
@@ -322,8 +470,11 @@ void net_mqtt_init(void)
 {
     snprintf(s_cmd_topic, sizeof(s_cmd_topic), "power/%s/command", NET_MQTT_DEVICE_ID);
     snprintf(s_telem_topic, sizeof(s_telem_topic), "power/%s/telemetry", NET_MQTT_DEVICE_ID);
+    snprintf(s_client_id, sizeof(s_client_id), "%s-%04x",
+             NET_MQTT_DEVICE_ID, (unsigned)(esp_random() & 0xFFFFU));
+    ESP_LOGI(TAG, "MQTT client_id=%s", s_client_id);
 
-    s_mqtt_task = rtos_task_create_psram(net_mqtt_task, "net_mqtt", NET_MQTT_TASK_STACK, NULL, 1);
+    s_mqtt_task = rtos_task_create_psram(net_mqtt_task, "net_mqtt", NET_MQTT_TASK_STACK, NULL, NET_MQTT_TASK_PRIO);
     if (!s_mqtt_task) {
         ESP_LOGE(TAG, "创建 MQTT 任务失败");
     }
@@ -333,6 +484,7 @@ void net_mqtt_suspend(void)
 {
     s_mqtt_suspended  = true;
     s_mqtt_connected  = false;
+    mqtt_sync_status_bar();
     if (s_client) {
         esp_mqtt_client_stop(s_client);
         ESP_LOGI(TAG, "MQTT 已暂停（Wi-Fi 操作）");

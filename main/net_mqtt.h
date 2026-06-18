@@ -7,6 +7,8 @@
 #ifndef NET_MQTT_H
 #define NET_MQTT_H
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,6 +36,9 @@ void net_mqtt_suspend(void);
 
 /** 恢复 MQTT 连接（由 net_wifi 调用）。 */
 void net_mqtt_resume(void);
+
+/** 当前是否已与 MQTT Broker 建立连接。 */
+bool net_mqtt_is_connected(void);
 
 #ifdef __cplusplus
 }

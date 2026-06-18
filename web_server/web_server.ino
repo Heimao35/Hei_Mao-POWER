@@ -202,10 +202,18 @@ static void connect_wifi(void)
 {
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(WIFI_PS_NONE);
+
+    if (!mqttBroker.init(MQTT_PORT)) {
+        Serial.println("[GW] MQTT broker init failed");
+    } else {
+        Serial.printf("[GW] MQTT broker started on port %d\n", MQTT_PORT);
+    }
+
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     Serial.printf("[GW] Connecting WiFi %s", WIFI_SSID);
     while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
+        mqttBroker.update();
+        delay(50);
         Serial.print('.');
     }
     Serial.println();
@@ -437,12 +445,6 @@ void setup()
 
     memset(s_devices, 0, sizeof(s_devices));
     connect_wifi();
-
-    if (!mqttBroker.init(MQTT_PORT)) {
-        Serial.println("[GW] MQTT broker init failed");
-    } else {
-        Serial.printf("[GW] MQTT broker started on port %d\n", MQTT_PORT);
-    }
 
     build_root_page();
 

@@ -39,7 +39,7 @@ static pd_spoof_event_cb_t s_evt_cb;
 static void              *s_evt_ud;
 static TaskHandle_t       s_btn_task;
 
-static void emit_event(pd_spoof_event_id_t id, bool from_button)
+static void emit_event_ex(pd_spoof_event_id_t id, bool from_button, bool from_remote)
 {
     if (!s_evt_cb) {
         return;
@@ -49,8 +49,14 @@ static void emit_event(pd_spoof_event_id_t id, bool from_button)
         .enabled     = s_enabled,
         .voltage     = s_selected,
         .from_button = from_button,
+        .from_remote = from_remote,
     };
     s_evt_cb(&evt, s_evt_ud);
+}
+
+static void emit_event(pd_spoof_event_id_t id, bool from_button)
+{
+    emit_event_ex(id, from_button, false);
 }
 
 static esp_err_t reg_write_u8(uint8_t reg, uint8_t val)
@@ -337,6 +343,39 @@ esp_err_t pd_spoof_set_enabled(bool enable)
         emit_event(PD_SPOOF_EVT_TOGGLED, false);
     }
     return err;
+}
+
+esp_err_t pd_spoof_set_enabled_remote(bool enable)
+{
+    if (!s_inited) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t err = pd_apply_enabled(enable);
+    if (err == ESP_OK) {
+        emit_event_ex(PD_SPOOF_EVT_TOGGLED, false, true);
+    }
+    return err;
+}
+
+esp_err_t pd_spoof_set_enabled_quiet(bool enable)
+{
+    if (!s_inited) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return pd_apply_enabled(enable);
+}
+
+esp_err_t pd_spoof_preset_voltage(pd_spoof_voltage_t voltage)
+{
+    if (!s_inited) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (voltage == s_selected) {
+        return ESP_OK;
+    }
+    s_selected = voltage;
+    return ESP_OK;
 }
 
 esp_err_t pd_spoof_toggle(bool from_button)

@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "freertos/FreeRTOS.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,8 +29,8 @@ typedef struct {
 void net_wifi_init(void);
 
 /**
- * After boot, wait then try saved STA in a low-priority task (does not compete with display bring-up).
- * Call once from app_main after @ref net_wifi_init; do not call @ref net_wifi_boot_try_saved directly at boot unless you need immediate connect.
+ * After boot, optional fallback if STA_START connect did not run (normally a no-op).
+ * Saved STA is attempted immediately on @ref WIFI_EVENT_STA_START inside @ref net_wifi_init.
  */
 void net_wifi_start_saved_reconnect_background(void);
 
@@ -48,6 +50,9 @@ typedef void (*net_wifi_connect_cb_t)(bool success, void *user_data);
 void net_wifi_connect_request(const char *ssid, const char *password, net_wifi_connect_cb_t cb, void *user_data);
 
 bool net_wifi_sta_has_ip(void);
+
+/** 阻塞直到 STA 获得 IPv4 或超时；有 IP 事件时立即返回。 */
+bool net_wifi_wait_sta_ip(TickType_t timeout_ticks);
 
 #ifdef __cplusplus
 }

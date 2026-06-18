@@ -1,10 +1,11 @@
 /**
  * @file ui_status_bar.c
- * @brief 右上角状态栏，仅显示 WiFi 连接状态。
+ * @brief 右上角状态栏：WiFi、MQTT 服务器、PD 状态指示。
  */
 #include "ui_status_bar.h"
 #include "ui_power_config.h"
 #include "net_wifi.h"
+#include "net_mqtt.h"
 #include "pd_spoof.h"
 
 #include "esp_event.h"
@@ -19,8 +20,11 @@
 #define UI_STATUS_EDGE_PAD  28
 #define UI_STATUS_ITEM_GAP  10
 
+#define UI_STATUS_MQTT_COLOR  0x7DD3FC
+
 static lv_obj_t *s_host;
 static lv_obj_t *s_pd_lbl;
+static lv_obj_t *s_mqtt_lbl;
 static lv_obj_t *s_wifi_lbl;
 static bool      s_events_registered;
 
@@ -83,6 +87,8 @@ static void status_bar_relayout(void)
                           && !lv_obj_has_flag(s_wifi_lbl, LV_OBJ_FLAG_HIDDEN);
     const bool pd_vis = s_pd_lbl && lv_obj_is_valid(s_pd_lbl)
                         && !lv_obj_has_flag(s_pd_lbl, LV_OBJ_FLAG_HIDDEN);
+    const bool mqtt_vis = s_mqtt_lbl && lv_obj_is_valid(s_mqtt_lbl)
+                          && !lv_obj_has_flag(s_mqtt_lbl, LV_OBJ_FLAG_HIDDEN);
 
     if (wifi_vis) {
         lv_obj_align(s_wifi_lbl, LV_ALIGN_TOP_RIGHT, -UI_STATUS_EDGE_PAD, UI_STATUS_STRIP_Y);
@@ -95,6 +101,16 @@ static void status_bar_relayout(void)
             lv_obj_align(s_pd_lbl, LV_ALIGN_TOP_RIGHT, -UI_STATUS_EDGE_PAD, UI_STATUS_STRIP_Y);
         }
     }
+
+    if (mqtt_vis) {
+        if (pd_vis) {
+            lv_obj_align_to(s_mqtt_lbl, s_pd_lbl, LV_ALIGN_OUT_LEFT_MID, -UI_STATUS_ITEM_GAP, 0);
+        } else if (wifi_vis) {
+            lv_obj_align_to(s_mqtt_lbl, s_wifi_lbl, LV_ALIGN_OUT_LEFT_MID, -UI_STATUS_ITEM_GAP, 0);
+        } else {
+            lv_obj_align(s_mqtt_lbl, LV_ALIGN_TOP_RIGHT, -UI_STATUS_EDGE_PAD, UI_STATUS_STRIP_Y);
+        }
+    }
 }
 
 static void boot_anim_status_y(void *var, int32_t v)
@@ -103,6 +119,9 @@ static void boot_anim_status_y(void *var, int32_t v)
     const lv_coord_t y = (lv_coord_t)v;
     if (s_wifi_lbl && lv_obj_is_valid(s_wifi_lbl)) {
         lv_obj_set_y(s_wifi_lbl, y);
+    }
+    if (s_mqtt_lbl && lv_obj_is_valid(s_mqtt_lbl) && !lv_obj_has_flag(s_mqtt_lbl, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_set_y(s_mqtt_lbl, y);
     }
     if (s_pd_lbl && lv_obj_is_valid(s_pd_lbl) && !lv_obj_has_flag(s_pd_lbl, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_set_y(s_pd_lbl, y);
@@ -118,6 +137,10 @@ static void boot_anim_ready_cb(lv_anim_t *a)
 typedef struct {
     bool show;
 } wifi_vis_msg_t;
+
+typedef struct {
+    bool show;
+} mqtt_vis_msg_t;
 
 typedef struct {
     bool show;
@@ -156,6 +179,37 @@ static void post_pd_visible(bool show)
     }
     m->show = show;
     if (lv_async_call(pd_vis_apply, m) != LV_RES_OK) {
+        lv_mem_free(m);
+    }
+}
+
+static void mqtt_vis_apply(void *p)
+{
+    mqtt_vis_msg_t *m = (mqtt_vis_msg_t *)p;
+    if (!m) {
+        return;
+    }
+    if (s_mqtt_lbl && lv_obj_is_valid(s_mqtt_lbl)) {
+        if (m->show) {
+            lv_label_set_text(s_mqtt_lbl, LV_SYMBOL_DRIVE);
+            lv_obj_clear_flag(s_mqtt_lbl, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_label_set_text(s_mqtt_lbl, "");
+            lv_obj_add_flag(s_mqtt_lbl, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    status_bar_relayout();
+    lv_mem_free(m);
+}
+
+static void post_mqtt_visible(bool show)
+{
+    mqtt_vis_msg_t *m = (mqtt_vis_msg_t *)lv_mem_alloc(sizeof(*m));
+    if (!m) {
+        return;
+    }
+    m->show = show;
+    if (lv_async_call(mqtt_vis_apply, m) != LV_RES_OK) {
         lv_mem_free(m);
     }
 }
@@ -214,6 +268,11 @@ void ui_status_bar_sync_wifi(void)
     post_wifi_visible(net_wifi_sta_has_ip());
 }
 
+void ui_status_bar_sync_mqtt(bool connected)
+{
+    post_mqtt_visible(connected);
+}
+
 void ui_status_bar_sync_pd(bool enabled)
 {
     post_pd_visible(enabled);
@@ -259,6 +318,9 @@ void ui_status_bar_init(lv_obj_t *screen)
     s_wifi_lbl = create_status_label(screen, "", 0x94A3B8, &lv_font_montserrat_22);
     lv_obj_add_flag(s_wifi_lbl, LV_OBJ_FLAG_HIDDEN);
 
+    s_mqtt_lbl = create_status_label(screen, "", UI_STATUS_MQTT_COLOR, &lv_font_montserrat_22);
+    lv_obj_add_flag(s_mqtt_lbl, LV_OBJ_FLAG_HIDDEN);
+
     if (!s_events_registered) {
         esp_err_t e1 = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_ip_event, NULL);
         esp_err_t e2 = esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &on_wifi_event, NULL);
@@ -268,6 +330,7 @@ void ui_status_bar_init(lv_obj_t *screen)
     }
 
     ui_status_bar_sync_wifi();
+    ui_status_bar_sync_mqtt(net_mqtt_is_connected());
 
     pd_spoof_status_t pd_st = {0};
     if (pd_spoof_get_status(&pd_st) == ESP_OK) {

@@ -57,6 +57,7 @@ typedef struct {
     bool                enabled;
     pd_spoof_voltage_t  voltage;
     bool                from_button;
+    bool                from_remote;
 } pd_spoof_event_t;
 
 typedef void (*pd_spoof_event_cb_t)(const pd_spoof_event_t *evt, void *user_data);
@@ -71,6 +72,15 @@ esp_err_t pd_spoof_select_voltage(pd_spoof_voltage_t voltage);
 
 /** 启动/关闭 PD；关闭时写 5V，开启时写当前预选档位。 */
 esp_err_t pd_spoof_set_enabled(bool enable);
+
+/** 远程/MQTT 启停 PD，触发与物理按键一致的 UI 反馈（弹窗、开关动画、蜂鸣）。 */
+esp_err_t pd_spoof_set_enabled_remote(bool enable);
+
+/** 静默启停 PD（不触发事件），供远程复合命令等内部流程使用。 */
+esp_err_t pd_spoof_set_enabled_quiet(bool enable);
+
+/** 仅更新预选档位（PD 须已关闭），不触发事件。 */
+esp_err_t pd_spoof_preset_voltage(pd_spoof_voltage_t voltage);
 
 /** 切换启停（物理按键 / UI 开关）。 */
 esp_err_t pd_spoof_toggle(bool from_button);

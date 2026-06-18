@@ -14,6 +14,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "lvgl.h"
@@ -30,9 +31,13 @@ static const char *TAG = "net_wifi";
 static esp_netif_t      *s_sta_netif;
 static bool              s_wifi_started;
 static SemaphoreHandle_t s_wifi_conn_mx;
+static EventGroupHandle_t s_wifi_events;
+static bool              s_boot_connect_done;
 
-/** Defer STA so LCD/LVGL init are not contending with Wi-Fi on the same boot window. */
-#define NET_WIFI_BOOT_RECONNECT_DELAY_MS  3000U
+#define WIFI_EVT_GOT_IP  (1U << 0)
+
+/** 若 STA_START 已触发但尚未连上，短延迟后兜底重试（不再固定等 3s）。 */
+#define NET_WIFI_BOOT_RECONNECT_DELAY_MS  400U
 #define NET_WIFI_BOOT_TASK_STACK          4096U
 #define NET_WIFI_BOOT_TASK_PRIO           1
 #define WIFI_SCAN_WORKER_STACK            5120U
@@ -320,6 +325,72 @@ static bool sta_ip_ready(void)
     return ip.ip.addr != 0;
 }
 
+static void wifi_mark_ip_lost(void)
+{
+    if (s_wifi_events) {
+        xEventGroupClearBits(s_wifi_events, WIFI_EVT_GOT_IP);
+    }
+}
+
+static void wifi_mark_ip_ready(void)
+{
+    if (s_wifi_events) {
+        xEventGroupSetBits(s_wifi_events, WIFI_EVT_GOT_IP);
+    }
+}
+
+bool net_wifi_wait_sta_ip(TickType_t ticks)
+{
+    if (sta_ip_ready()) {
+        return true;
+    }
+    if (!s_wifi_events) {
+        vTaskDelay(ticks);
+        return sta_ip_ready();
+    }
+    const EventBits_t bits = xEventGroupWaitBits(s_wifi_events, WIFI_EVT_GOT_IP, pdFALSE, pdFALSE, ticks);
+    return ((bits & WIFI_EVT_GOT_IP) != 0) || sta_ip_ready();
+}
+
+static void on_sta_got_ip(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    (void)arg;
+    (void)event_data;
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        wifi_mark_ip_ready();
+    }
+}
+
+static void on_sta_disconnected(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    (void)arg;
+    (void)event_data;
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_mark_ip_lost();
+    }
+}
+
+static void try_boot_connect_once(void)
+{
+    if (s_boot_connect_done) {
+        return;
+    }
+
+    if (!s_wifi_started) {
+        return;
+    }
+
+    char ssid[NET_WIFI_SSID_MAX_LEN + 1];
+    char pass[NET_WIFI_PASS_MAX_LEN + 1];
+    if (creds_load(ssid, sizeof(ssid), pass, sizeof(pass)) != ESP_OK || ssid[0] == '\0') {
+        s_boot_connect_done = true;
+        return;
+    }
+
+    s_boot_connect_done = true;
+    net_wifi_boot_try_saved();
+}
+
 static void conn_deliver_work_cb(void *p)
 {
     conn_work_t *job = (conn_work_t *)p;
@@ -514,7 +585,12 @@ static void wifi_boot_reconnect_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(NET_WIFI_BOOT_RECONNECT_DELAY_MS));
-    net_wifi_boot_try_saved();
+    if (!sta_ip_ready()) {
+        try_boot_connect_once();
+        if (!sta_ip_ready()) {
+            net_wifi_boot_try_saved();
+        }
+    }
     vTaskDelete(NULL);
 }
 
@@ -542,7 +618,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     (void)arg;
     (void)event_data;
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        ESP_LOGD(TAG, "STA_START");
+        try_boot_connect_once();
     }
 }
 
@@ -563,20 +639,32 @@ void net_wifi_init(void)
         ESP_ERROR_CHECK(ne);
     }
     s_sta_netif = esp_netif_create_default_wifi_sta();
+    s_wifi_events = xEventGroupCreate();
+    if (!s_wifi_events) {
+        ESP_LOGE(TAG, "wifi event group create failed");
+    }
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_sta_got_ip, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &on_sta_disconnected, NULL));
 
     wifi_init_config_t icfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&icfg));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
 
+    s_wifi_conn_mx = xSemaphoreCreateMutex();
+    s_wifi_started = true;
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
-    s_wifi_started = true;
-    s_wifi_conn_mx = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    if (sta_ip_ready()) {
+        wifi_mark_ip_ready();
+    }
     if (!wifi_scan_worker_start()) {
         ESP_LOGE(TAG, "wifi scan worker init failed");
     }
     if (!wifi_conn_worker_start()) {
         ESP_LOGE(TAG, "wifi conn worker init failed");
     }
+    try_boot_connect_once();
     ESP_LOGI(TAG, "wifi sta ready");
 }
