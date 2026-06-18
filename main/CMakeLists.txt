@@ -6,6 +6,7 @@ file(GLOB_RECURSE srcs *.c
 list(FILTER srcs EXCLUDE REGEX ".*/(app_time|rtc_pcf85063|ui_main_clock)\\.c$")
 
 list(APPEND srcs
+    "ui/menu/ui_boot_splash.c"
     "ui/menu/ui_status_bar.c"
     "ui/menu/ui_power_app.c"
     "ui/menu/ui_power_main.c"

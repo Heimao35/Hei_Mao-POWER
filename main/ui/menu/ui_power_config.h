@@ -17,6 +17,15 @@ extern "C" {
 #define UI_POWER_BOOT_STATUS_SLIDE_PX 56
 #define UI_POWER_BOOT_CLOCK_SLIDE_PX  180
 
+/** 开机动画各阶段时长 (ms)。 */
+#define UI_BOOT_SPLASH_FADE_IN_MS     620
+#define UI_BOOT_SPLASH_ARC_MS         720
+#define UI_BOOT_SPLASH_BAR_MS         480
+#define UI_BOOT_SPLASH_HOLD_MS        380
+#define UI_BOOT_SPLASH_SLIDE_OUT_MS   520
+#define UI_BOOT_SPLASH_MAIN_FADE_MS   480
+#define UI_BOOT_SPLASH_ACCENT         0x5EEAD4
+
 /** 触发返回/切换的最小滑动距离 (px)。 */
 #define UI_POWER_SWIPE_MIN_PX       50
 

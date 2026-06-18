@@ -37,6 +37,7 @@
 #include "esp_lcd_touch_cst820.h"
 
 #include "ui/menu/ui_power_app.h"
+#include "ui/menu/ui_boot_splash.h"
 
 #include "net_wifi.h"
 
@@ -728,7 +729,8 @@ void app_main(void)
 
     {
 
-        ui_power_app_init();
+        ui_power_app_prepare_hidden();
+        ui_boot_splash_play();
 
         example_lvgl_unlock();
 

@@ -71,6 +71,11 @@ static void anim_set_y_cb(void *var, int32_t v)
     lv_obj_set_y((lv_obj_t *)var, v);
 }
 
+static void anim_set_opa_cb(void *var, int32_t v)
+{
+    lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, LV_PART_MAIN);
+}
+
 static void panel_apply_theme(lv_obj_t *panel)
 {
     lv_obj_set_style_bg_color(panel, lv_color_hex(UI_POWER_MAIN_BG), LV_PART_MAIN);
@@ -579,6 +584,78 @@ static void pd_event_cb(const pd_spoof_event_t *evt, void *user_data)
 
 void ui_power_app_init(void)
 {
+    ui_power_app_prepare_hidden();
+    lv_obj_set_style_opa(s_ctx.main_panel, LV_OPA_COVER, LV_PART_MAIN);
+    ui_status_bar_boot_slide_in();
+}
+
+lv_obj_t *ui_power_app_get_screen(void)
+{
+    if (s_ctx.screen && lv_obj_is_valid(s_ctx.screen)) {
+        return s_ctx.screen;
+    }
+    return NULL;
+}
+
+lv_obj_t *ui_power_app_get_stage(void)
+{
+    if (s_ctx.stage && lv_obj_is_valid(s_ctx.stage)) {
+        return s_ctx.stage;
+    }
+    return NULL;
+}
+
+typedef struct {
+    void (*cb)(void);
+} overlay_slide_ud_t;
+
+static void overlay_slide_done(void *ud)
+{
+    overlay_slide_ud_t *msg = (overlay_slide_ud_t *)ud;
+    if (msg) {
+        if (msg->cb) {
+            msg->cb();
+        }
+        lv_mem_free(msg);
+    }
+}
+
+void ui_power_app_slide_overlay_down(lv_obj_t *overlay, void (*on_done)(void))
+{
+    if (!overlay || !lv_obj_is_valid(overlay) || !s_ctx.screen) {
+        if (on_done) {
+            on_done();
+        }
+        return;
+    }
+
+    lv_anim_del(overlay, anim_set_y_cb);
+
+    if (lv_obj_get_parent(overlay) != s_ctx.screen) {
+        lv_obj_set_parent(overlay, s_ctx.screen);
+    }
+
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_size(overlay, s_ctx.scr_w, s_ctx.scr_h);
+    lv_obj_set_pos(overlay, 0, lv_obj_get_y(overlay));
+    lv_obj_move_foreground(overlay);
+
+    overlay_slide_ud_t *msg = (overlay_slide_ud_t *)lv_mem_alloc(sizeof(*msg));
+    if (!msg) {
+        if (on_done) {
+            on_done();
+        }
+        return;
+    }
+    msg->cb = on_done;
+
+    const lv_coord_t y_from = lv_obj_get_y(overlay);
+    /* 与 toggle_bottom_sheet(false) 相同：全屏 overlay 向下滑出，ease_in。 */
+    start_slide_y(overlay, y_from, s_ctx.scr_h, overlay_slide_done, msg, lv_anim_path_ease_in);
+}
+
+void ui_power_app_prepare_hidden(void)
+{
     memset(&s_ctx, 0, sizeof(s_ctx));
     s_ctx.view_mode = UI_POWER_VIEW_NUMERIC;
     s_ctx.sub_page  = UI_POWER_SUB_NONE;
@@ -634,10 +711,32 @@ void ui_power_app_init(void)
     ui_status_bar_init(scr);
 
     lv_disp_load_scr(scr);
-    ui_status_bar_boot_slide_in();
 
     s_ctx.refresh_timer = lv_timer_create(refresh_timer_cb, UI_POWER_REFRESH_MS, NULL);
     if (s_ctx.refresh_timer) {
         lv_timer_set_repeat_count(s_ctx.refresh_timer, -1);
     }
+}
+
+void ui_power_app_fade_in(void)
+{
+    if (!s_ctx.main_panel || !lv_obj_is_valid(s_ctx.main_panel)) {
+        return;
+    }
+
+    lv_obj_t *scr = s_ctx.screen;
+    if (scr && lv_obj_is_valid(scr)) {
+        lv_obj_invalidate(scr);
+    }
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_ctx.main_panel);
+    lv_anim_set_exec_cb(&a, anim_set_opa_cb);
+    lv_anim_set_values(&a, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_time(&a, UI_BOOT_SPLASH_MAIN_FADE_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+
+    ui_status_bar_boot_slide_in();
 }
