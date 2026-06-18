@@ -74988,7 +74988,7 @@ LOAD C:/Users/Administrator/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20250730/
  .rodata.power_meter_format_current.str1.4
                 0x3c0d3f2e       0x17 esp-idf/main/libmain.a(power_meter.c.obj)
  .rodata.ui_boot_splash_play.str1.4
-                0x3c0d3f2e        0xf esp-idf/main/libmain.a(ui_boot_splash.c.obj)
+                0x3c0d3f2e        0xe esp-idf/main/libmain.a(ui_boot_splash.c.obj)
  .rodata.update_readings$constprop$0.str1.4
                 0x3c0d3f2e       0x1b esp-idf/main/libmain.a(ui_power_main.c.obj)
  .rodata.create_chart_legend_row$constprop$0.str1.4

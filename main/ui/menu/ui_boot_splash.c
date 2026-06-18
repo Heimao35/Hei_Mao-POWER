@@ -302,7 +302,7 @@ void ui_boot_splash_play(void)
     s_boot.title = make_label(arc, "Hei_Mao", &lv_font_montserrat_28, 0xF8FAFC);
     lv_obj_center(s_boot.title);
 
-    s_boot.subtitle = make_label(logo_col, "-POWER", &lv_font_montserrat_22, UI_BOOT_SPLASH_ACCENT);
+    s_boot.subtitle = make_label(logo_col, "POWER", &lv_font_montserrat_22, UI_BOOT_SPLASH_ACCENT);
     lv_obj_align_to(s_boot.subtitle, arc, LV_ALIGN_OUT_BOTTOM_MID, 0, BOOT_SUBTITLE_GAP);
 
     lv_obj_t *bar = lv_obj_create(logo_col);
