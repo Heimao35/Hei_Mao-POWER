@@ -228,10 +228,16 @@ void power_meter_format_current(float current_a, char *buf, size_t buf_len)
 
     if (abs_a >= 1.0f) {
         (void)snprintf(buf, buf_len, "%.2f A", (double)current_a);
-    } else if (lsb > 0.0f && abs_a >= lsb * 0.5f) {
-        /* 分辨率 0.5 mA 时显示一位小数 mA */
+    } else if (abs_a >= 0.001f) {
         (void)snprintf(buf, buf_len, "%.1f mA", (double)(current_a * 1000.0f));
+    } else if (lsb > 0.0f && abs_a >= lsb * 0.5f) {
+        const double ua = (double)(current_a * 1e6f);
+        if (lsb < 0.0001f) {
+            (void)snprintf(buf, buf_len, "%.1f uA", ua);
+        } else {
+            (void)snprintf(buf, buf_len, "%.0f uA", ua);
+        }
     } else {
-        (void)snprintf(buf, buf_len, "0.0 mA");
+        (void)snprintf(buf, buf_len, "0 uA");
     }
 }

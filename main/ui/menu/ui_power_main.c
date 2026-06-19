@@ -252,9 +252,9 @@ static lv_obj_t *create_numeric_view(lv_obj_t *parent)
     apply_view_bg(root);
     lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
 
-    create_metric_row(root, "Voltage (V)", NUM_ROW_Y0, &s_lbl_voltage, 0xF8FAFC);
+    create_metric_row(root, "Voltage", NUM_ROW_Y0, &s_lbl_voltage, 0xF8FAFC);
     create_metric_row(root, "Current", NUM_ROW_Y0 + NUM_ROW_H + NUM_ROW_GAP, &s_lbl_current, 0xF8FAFC);
-    create_metric_row(root, "Power (W)", NUM_ROW_Y0 + 2 * (NUM_ROW_H + NUM_ROW_GAP), &s_lbl_power, 0x5EEAD4);
+    create_metric_row(root, "Power", NUM_ROW_Y0 + 2 * (NUM_ROW_H + NUM_ROW_GAP), &s_lbl_power, 0x5EEAD4);
 
     return root;
 }
@@ -349,21 +349,15 @@ static lv_obj_t *create_chart_view(lv_obj_t *parent)
 }
 
 static void update_readings(power_meter_reading_t *rd, char *v_buf, size_t v_len,
-                            char *i_buf, size_t i_len, char *p_buf, size_t p_len,
-                            bool with_unit)
+                            char *i_buf, size_t i_len, char *p_buf, size_t p_len)
 {
-    if (with_unit) {
-        (void)snprintf(v_buf, v_len, "%.2f V", (double)rd->voltage_v);
-        (void)snprintf(p_buf, p_len, "%.1f W", (double)rd->power_w);
-    } else {
-        (void)snprintf(v_buf, v_len, "%.2f", (double)rd->voltage_v);
-        (void)snprintf(p_buf, p_len, "%.2f", (double)rd->power_w);
-    }
+    (void)snprintf(v_buf, v_len, "%.2f V", (double)rd->voltage_v);
     if (rd->overflow) {
         (void)snprintf(i_buf, i_len, "OL");
     } else {
         power_meter_format_current(rd->current_a, i_buf, i_len);
     }
+    (void)snprintf(p_buf, p_len, "%.1f W", (double)rd->power_w);
 }
 
 static void chart_update_scale_label(void)
@@ -400,7 +394,7 @@ static void chart_update_legend(const power_meter_reading_t *rd)
     char ci_buf[24];
     char cp_buf[16];
     power_meter_reading_t tmp = *rd;
-    update_readings(&tmp, cv_buf, sizeof(cv_buf), ci_buf, sizeof(ci_buf), cp_buf, sizeof(cp_buf), true);
+    update_readings(&tmp, cv_buf, sizeof(cv_buf), ci_buf, sizeof(ci_buf), cp_buf, sizeof(cp_buf));
     if (s_lbl_chart_v && lv_obj_is_valid(s_lbl_chart_v)) {
         lv_label_set_text(s_lbl_chart_v, cv_buf);
     }
@@ -500,7 +494,7 @@ void ui_power_main_refresh(void)
     char v_buf[16];
     char i_buf[24];
     char p_buf[16];
-    update_readings(&rd, v_buf, sizeof(v_buf), i_buf, sizeof(i_buf), p_buf, sizeof(p_buf), false);
+    update_readings(&rd, v_buf, sizeof(v_buf), i_buf, sizeof(i_buf), p_buf, sizeof(p_buf));
 
     if (s_lbl_voltage && lv_obj_is_valid(s_lbl_voltage)) {
         lv_label_set_text(s_lbl_voltage, v_buf);

@@ -21,7 +21,7 @@ extern "C" {
 
 /** 分流电阻阻值 (Ω)，按硬件修改 */
 #ifndef INA236_RSHUNT_OHM
-#define INA236_RSHUNT_OHM  0.005f
+#define INA236_RSHUNT_OHM  0.008f
 #endif
 
 /** 设计最大测量电流 (A)，用于校准 CURRENT_LSB */

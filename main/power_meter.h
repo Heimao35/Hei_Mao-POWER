@@ -40,7 +40,7 @@ bool power_meter_is_ready(void);
 /** 电流寄存器分辨率 (A)，即 1 LSB 对应电流。 */
 float power_meter_current_resolution_a(void);
 
-/** 按分辨率格式化为带单位的字符串（A / mA）。 */
+/** 按分辨率格式化为带单位的字符串（A / mA / uA）。 */
 void power_meter_format_current(float current_a, char *buf, size_t buf_len);
 
 #ifdef __cplusplus
