@@ -1,4 +1,4 @@
-
+#main中的代码为功率计代码,使用esp-idf v5.4.3编译;web_sever中是esp32网关的代码使用arduino ide编译开发板包版本v3.0.2,网关与功率计的设置请查看下方内容
 
 # 功率计 MQTT 网关（ESP32-S3 Arduino）
 
