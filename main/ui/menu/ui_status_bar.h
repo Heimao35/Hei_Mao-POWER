@@ -12,6 +12,8 @@ extern "C" {
 #endif
 
 void ui_status_bar_init(lv_obj_t *screen);
+/** 将状态栏标签置于 screen 最前，避免被全屏 overlay 遮挡。 */
+void ui_status_bar_raise_to_front(void);
 void ui_status_bar_sync_wifi(void);
 void ui_status_bar_sync_mqtt(bool connected);
 void ui_status_bar_sync_pd(bool enabled);

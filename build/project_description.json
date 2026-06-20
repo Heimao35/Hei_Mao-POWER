@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "Opal",
-    "project_version":    "c02a90a-dirty",
+    "project_version":    "8008e9b-dirty",
     "project_path":       "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL",
     "idf_path":           "D:/ban gong/espidf/v5.4.3/esp-idf",
     "build_dir":          "F:/PROJECT/Hei_Mao-power/code/ESP-TERMINAL/build",

@@ -4,6 +4,7 @@
  */
 #include "ui_status_bar.h"
 #include "ui_power_config.h"
+#include "ui_power_sheet.h"
 #include "net_wifi.h"
 #include "net_mqtt.h"
 #include "pd_spoof.h"
@@ -77,6 +78,19 @@ static void status_bar_invalidate_area_padded(lv_obj_t *obj)
     lv_obj_invalidate_area(s_host, &area);
 }
 
+void ui_status_bar_raise_to_front(void)
+{
+    if (s_wifi_lbl && lv_obj_is_valid(s_wifi_lbl)) {
+        lv_obj_move_foreground(s_wifi_lbl);
+    }
+    if (s_mqtt_lbl && lv_obj_is_valid(s_mqtt_lbl)) {
+        lv_obj_move_foreground(s_mqtt_lbl);
+    }
+    if (s_pd_lbl && lv_obj_is_valid(s_pd_lbl)) {
+        lv_obj_move_foreground(s_pd_lbl);
+    }
+}
+
 static void status_bar_relayout(void)
 {
     if (!s_host) {
@@ -110,6 +124,10 @@ static void status_bar_relayout(void)
         } else {
             lv_obj_align(s_mqtt_lbl, LV_ALIGN_TOP_RIGHT, -UI_STATUS_EDGE_PAD, UI_STATUS_STRIP_Y);
         }
+    }
+
+    if (ui_power_sheet_bottom_is_open()) {
+        ui_status_bar_raise_to_front();
     }
 }
 

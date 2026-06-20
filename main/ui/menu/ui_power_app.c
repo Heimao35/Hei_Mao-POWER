@@ -309,6 +309,10 @@ static void toggle_bottom_sheet(bool open)
     }
 
     ui_power_sheet_set_bottom_open(open);
+
+    if (open) {
+        ui_status_bar_raise_to_front();
+    }
     const lv_coord_t y_target = open ? y_shown : y_hidden;
     const lv_coord_t y_from   = open ? y_hidden : lv_obj_get_y(bot);
     const lv_anim_path_cb_t path = open ? lv_anim_path_ease_out : lv_anim_path_ease_in;
