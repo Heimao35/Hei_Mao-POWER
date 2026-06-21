@@ -12,8 +12,8 @@
  */
 
 // ======================== USER CONFIG ========================
-#define WIFI_SSID       "你的wifi名称"
-#define WIFI_PASS       "你的wifi密码"
+#define WIFI_SSID       "A2-606"
+#define WIFI_PASS       "1742137034"
 
 #define MQTT_PORT       1883
 #define HTTP_PORT       80

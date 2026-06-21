@@ -24,15 +24,16 @@ extern "C" {
 #define INA236_RSHUNT_OHM  0.008f
 #endif
 
-/** 设计最大测量电流 (A)，用于校准 CURRENT_LSB */
+/** 设计最大测量电流 (A)，用于 SHUNT_CAL / CURRENT 寄存器校准 */
 #ifndef INA236_IMAX_A
-#define INA236_IMAX_A  10.0f
+#define INA236_IMAX_A  7.0f
 #endif
 
 /**
- * 电流分辨率理论下限（供显示/文档参考，依赖 RSHUNT 与 IMAX）：
- * - 精细量程分流 ADC：625 nV/LSB → I_LSB_shunt = 625e-9 / RSHUNT
- * - 电流寄存器：CURRENT_LSB >= IMAX / 32768（与校准值绑定）
+ * 测量精度参考（依赖 RSHUNT 与量程）：
+ * - 应用层电流由分流 ADC 换算：I = V_shunt / RSHUNT
+ * - 精细量程：625 nV/LSB → I_LSB = 625e-9 / RSHUNT
+ * - 粗量程：2.5 µV/LSB → I_LSB = 2.5e-6 / RSHUNT
  * - 零点偏移：±5 µV / RSHUNT（数据手册最大偏移）
  */
 #define INA236_SHUNT_OFFSET_V_MAX  5.0e-6f
@@ -53,8 +54,8 @@ typedef enum {
 typedef struct {
     float shunt_v;   /**< 分流电压 (V) */
     float bus_v;     /**< 母线电压 (V) */
-    float current_a; /**< 电流 (A) */
-    float power_w;   /**< 功率 (W) */
+    float current_a; /**< 电流 (A)，由 shunt_v / RSHUNT 换算 */
+    float power_w;   /**< 功率 (W)，由 current_a × bus_v 换算 */
     bool  overflow;  /**< 数学溢出标志 */
     ina236_range_t range;
 } ina236_reading_t;
@@ -69,8 +70,11 @@ typedef struct {
     bool          present;
 } ina236_dev_t;
 
-/** 返回器件使用的电流寄存器 LSB (A)。 */
+/** 返回 SHUNT_CAL 使用的 CURRENT 寄存器 LSB (A)。 */
 float ina236_get_current_lsb(const ina236_dev_t *dev);
+
+/** 分流 ADC 换算的电流分辨率 (A)：shunt_voltage_lsb / RSHUNT。 */
+float ina236_shunt_current_resolution_a(ina236_range_t range);
 
 /**
  * @brief 探测并初始化 INA236（校验 Manufacturer / Device ID）。

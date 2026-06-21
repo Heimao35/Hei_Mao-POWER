@@ -21,9 +21,8 @@
 #define NUM_ROW_Y0         88
 #define NUM_ROW_GAP        24
 #define NUM_LABEL_X        16
-#define NUM_LABEL_W        148
-#define NUM_VALUE_X        168
-#define NUM_VALUE_W        230
+#define NUM_VALUE_X        128
+#define NUM_VALUE_RIGHT_PAD 12
 
 /** 固定档位跨度：按窗口峰峰值选档，居中显示 */
 static const float s_span_v[] = {0.5f, 2.0f, 8.0f, 30.0f};
@@ -58,6 +57,44 @@ static chart_hist_t         s_hist_v;
 static chart_hist_t         s_hist_i;
 static chart_hist_t         s_hist_p;
 
+static lv_coord_t num_value_w(void)
+{
+    if (!s_scr_w) {
+        s_scr_w = lv_disp_get_hor_res(lv_disp_get_default());
+    }
+    return s_scr_w - NUM_VALUE_X - NUM_VALUE_RIGHT_PAD;
+}
+
+static void disable_obj_scroll(lv_obj_t *obj)
+{
+    if (!obj) {
+        return;
+    }
+    lv_obj_set_scrollbar_mode(obj, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(obj, LV_DIR_NONE);
+    lv_obj_scroll_to(obj, 0, 0, LV_ANIM_OFF);
+}
+
+static void reset_metric_value_scroll(lv_obj_t *val_lbl)
+{
+    if (!val_lbl || !lv_obj_is_valid(val_lbl)) {
+        return;
+    }
+    for (lv_obj_t *obj = val_lbl; obj; obj = lv_obj_get_parent(obj)) {
+        disable_obj_scroll(obj);
+    }
+}
+
+static void set_metric_value_text(lv_obj_t *val_lbl, const char *text)
+{
+    if (!val_lbl || !lv_obj_is_valid(val_lbl)) {
+        return;
+    }
+    lv_label_set_text(val_lbl, text);
+    reset_metric_value_scroll(val_lbl);
+}
+
 static void strip_obj_decor(lv_obj_t *obj)
 {
     if (!obj) {
@@ -75,6 +112,45 @@ static void apply_view_bg(lv_obj_t *root)
     lv_obj_set_style_bg_color(root, lv_color_hex(UI_POWER_MAIN_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, LV_PART_MAIN);
     strip_obj_decor(root);
+    lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(root, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_remove_style(root, NULL, LV_PART_SCROLLBAR | LV_STATE_ANY);
+    disable_obj_scroll(root);
+}
+
+static lv_obj_t *create_plain_container(lv_obj_t *parent)
+{
+    lv_obj_t *obj = lv_obj_create(parent);
+    lv_obj_remove_style_all(obj);
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(obj, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_NONE, LV_PART_MAIN);
+    lv_obj_set_style_outline_width(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN);
+    lv_obj_set_scrollbar_mode(obj, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(obj, LV_DIR_NONE);
+    lv_obj_remove_style(obj, NULL, LV_PART_SCROLLBAR | LV_STATE_ANY);
+    disable_obj_scroll(obj);
+    return obj;
+}
+
+static lv_obj_t *create_plain_label(lv_obj_t *parent)
+{
+    lv_obj_t *lb = lv_label_create(parent);
+    lv_obj_remove_style_all(lb);
+    lv_obj_clear_flag(lb, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(lb, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(lb, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(lb, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_side(lb, LV_BORDER_SIDE_NONE, LV_PART_MAIN);
+    lv_obj_set_style_outline_width(lb, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(lb, 0, LV_PART_MAIN);
+    lv_obj_remove_style(lb, NULL, LV_PART_SCROLLBAR | LV_STATE_ANY);
+    return lb;
 }
 
 static void chart_hist_reset(chart_hist_t *h)
@@ -218,31 +294,26 @@ static void touch_pass_through_tree(lv_obj_t *obj)
 static void create_metric_row(lv_obj_t *parent, const char *title, lv_coord_t y,
                               lv_obj_t **val_lbl, uint32_t val_color)
 {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_set_size(row, lv_pct(100), NUM_ROW_H);
-    lv_obj_align(row, LV_ALIGN_TOP_LEFT, 0, y);
-    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
-    strip_obj_decor(row);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    const lv_coord_t title_y = y + (NUM_ROW_H - lv_font_get_line_height(&lv_font_montserrat_18)) / 2;
+    const lv_coord_t value_y = y + (NUM_ROW_H - lv_font_get_line_height(&lv_font_montserrat_48)) / 2;
 
-    lv_obj_t *t = lv_label_create(row);
-    lv_obj_set_pos(t, NUM_LABEL_X, (NUM_ROW_H - lv_font_get_line_height(&lv_font_montserrat_18)) / 2);
-    lv_obj_set_width(t, NUM_LABEL_W);
+    lv_obj_t *t = create_plain_label(parent);
+    lv_obj_set_pos(t, NUM_LABEL_X, title_y);
     lv_label_set_text(t, title);
-    lv_label_set_long_mode(t, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_color(t, lv_color_hex(0x64748B), LV_PART_MAIN);
     lv_obj_set_style_text_font(t, &lv_font_montserrat_18, LV_PART_MAIN);
-    strip_obj_decor(t);
 
-    *val_lbl = lv_label_create(row);
-    lv_obj_set_pos(*val_lbl, NUM_VALUE_X, (NUM_ROW_H - lv_font_get_line_height(&lv_font_montserrat_48)) / 2);
-    lv_obj_set_width(*val_lbl, NUM_VALUE_W);
+    lv_obj_t *val_slot = create_plain_container(parent);
+    lv_obj_set_pos(val_slot, NUM_VALUE_X, y);
+    lv_obj_set_size(val_slot, num_value_w(), NUM_ROW_H);
+
+    *val_lbl = create_plain_label(val_slot);
+    lv_obj_set_pos(*val_lbl, 0, value_y - y);
     lv_label_set_text(*val_lbl, "--");
-    lv_label_set_long_mode(*val_lbl, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_align(*val_lbl, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
     lv_obj_set_style_text_color(*val_lbl, lv_color_hex(val_color), LV_PART_MAIN);
     lv_obj_set_style_text_font(*val_lbl, &lv_font_montserrat_48, LV_PART_MAIN);
-    strip_obj_decor(*val_lbl);
+    lv_obj_add_flag(*val_lbl, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    reset_metric_value_scroll(*val_lbl);
 }
 
 static lv_obj_t *create_numeric_view(lv_obj_t *parent)
@@ -357,7 +428,7 @@ static void update_readings(power_meter_reading_t *rd, char *v_buf, size_t v_len
     } else {
         power_meter_format_current(rd->current_a, i_buf, i_len);
     }
-    (void)snprintf(p_buf, p_len, "%.1f W", (double)rd->power_w);
+    power_meter_format_power(rd->power_w, p_buf, p_len);
 }
 
 static void chart_update_scale_label(void)
@@ -392,7 +463,7 @@ static void chart_update_legend(const power_meter_reading_t *rd)
     }
     char cv_buf[16];
     char ci_buf[24];
-    char cp_buf[16];
+    char cp_buf[20];
     power_meter_reading_t tmp = *rd;
     update_readings(&tmp, cv_buf, sizeof(cv_buf), ci_buf, sizeof(ci_buf), cp_buf, sizeof(cp_buf));
     if (s_lbl_chart_v && lv_obj_is_valid(s_lbl_chart_v)) {
@@ -422,6 +493,13 @@ static void chart_push_sample(float v, float i, float p)
 void ui_power_main_create(lv_obj_t *parent)
 {
     s_scr_w = lv_disp_get_hor_res(lv_obj_get_disp(parent));
+    disable_obj_scroll(parent);
+    lv_obj_add_flag(parent, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    lv_obj_t *stage = lv_obj_get_parent(parent);
+    if (stage) {
+        disable_obj_scroll(stage);
+        lv_obj_add_flag(stage, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    }
     s_mode  = UI_POWER_VIEW_NUMERIC;
     s_numeric_root = create_numeric_view(parent);
     s_chart_root   = create_chart_view(parent);
@@ -493,17 +571,26 @@ void ui_power_main_refresh(void)
 
     char v_buf[16];
     char i_buf[24];
-    char p_buf[16];
+    char p_buf[20];
     update_readings(&rd, v_buf, sizeof(v_buf), i_buf, sizeof(i_buf), p_buf, sizeof(p_buf));
 
     if (s_lbl_voltage && lv_obj_is_valid(s_lbl_voltage)) {
-        lv_label_set_text(s_lbl_voltage, v_buf);
+        set_metric_value_text(s_lbl_voltage, v_buf);
     }
     if (s_lbl_current && lv_obj_is_valid(s_lbl_current)) {
-        lv_label_set_text(s_lbl_current, i_buf);
+        set_metric_value_text(s_lbl_current, i_buf);
     }
     if (s_lbl_power && lv_obj_is_valid(s_lbl_power)) {
-        lv_label_set_text(s_lbl_power, p_buf);
+        set_metric_value_text(s_lbl_power, p_buf);
+    }
+
+    if (s_numeric_root && lv_obj_is_valid(s_numeric_root)) {
+        disable_obj_scroll(s_numeric_root);
+        lv_obj_t *panel = lv_obj_get_parent(s_numeric_root);
+        if (panel) {
+            disable_obj_scroll(panel);
+            lv_obj_add_flag(panel, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+        }
     }
 
     if (s_mode != UI_POWER_VIEW_CHART) {

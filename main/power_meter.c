@@ -164,12 +164,10 @@ esp_err_t power_meter_init(i2c_port_t port)
     }
 
     s_inited = true;
-    const float lsb = ina236_get_current_lsb(&s_ina);
-    const float shunt_adc_lsb_a = 625e-9f / INA236_RSHUNT_OHM;
+    const float shunt_i_lsb = ina236_shunt_current_resolution_a(INA236_RANGE_FINE);
     const float offset_a = INA236_SHUNT_OFFSET_V_MAX / INA236_RSHUNT_OHM;
-    ESP_LOGI(TAG, "功率计就绪 ALERT=GPIO%d | 电流分辨率 %.1f mA | 分流ADC %.1f mA | 零点误差约 ±%.1f mA",
-             (int)POWER_METER_ALERT_GPIO, (double)(lsb * 1000.0f), (double)(shunt_adc_lsb_a * 1000.0f),
-             (double)(offset_a * 1000.0f));
+    ESP_LOGI(TAG, "功率计就绪 ALERT=GPIO%d | 分流电流分辨率 %.1f uA | 零点误差约 ±%.1f mA",
+             (int)POWER_METER_ALERT_GPIO, (double)(shunt_i_lsb * 1e6f), (double)(offset_a * 1000.0f));
     return ESP_OK;
 }
 
@@ -214,7 +212,10 @@ bool power_meter_is_ready(void)
 
 float power_meter_current_resolution_a(void)
 {
-    return ina236_get_current_lsb(&s_ina);
+    if (!s_inited) {
+        return ina236_shunt_current_resolution_a(INA236_RANGE_FINE);
+    }
+    return ina236_shunt_current_resolution_a(s_ina.range);
 }
 
 void power_meter_format_current(float current_a, char *buf, size_t buf_len)
@@ -223,21 +224,30 @@ void power_meter_format_current(float current_a, char *buf, size_t buf_len)
         return;
     }
 
-    const float lsb = power_meter_current_resolution_a();
     const float abs_a = fabsf(current_a);
 
     if (abs_a >= 1.0f) {
         (void)snprintf(buf, buf_len, "%.2f A", (double)current_a);
     } else if (abs_a >= 0.001f) {
-        (void)snprintf(buf, buf_len, "%.1f mA", (double)(current_a * 1000.0f));
-    } else if (lsb > 0.0f && abs_a >= lsb * 0.5f) {
-        const double ua = (double)(current_a * 1e6f);
-        if (lsb < 0.0001f) {
-            (void)snprintf(buf, buf_len, "%.1f uA", ua);
-        } else {
-            (void)snprintf(buf, buf_len, "%.0f uA", ua);
-        }
+        (void)snprintf(buf, buf_len, "%.2f mA", (double)(current_a * 1000.0f));
     } else {
-        (void)snprintf(buf, buf_len, "0 uA");
+        (void)snprintf(buf, buf_len, "%.1f uA", (double)(current_a * 1e6f));
+    }
+}
+
+/** 固定 W 单位格式化；按量级增加小数位，不切换 mW/uW，并控制字符串长度以利 UI 布局。 */
+void power_meter_format_power(float power_w, char *buf, size_t buf_len)
+{
+    if (!buf || buf_len == 0) {
+        return;
+    }
+
+    const float abs_w = fabsf(power_w);
+
+    if (abs_w >= 1.0f) {
+        (void)snprintf(buf, buf_len, "%.3f W", (double)power_w);
+    } else {
+        /* < 1 W：仍用 W，多一位小数（最长约 "0.9999 W"，8 字符） */
+        (void)snprintf(buf, buf_len, "%.4f W", (double)power_w);
     }
 }

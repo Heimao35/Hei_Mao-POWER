@@ -37,11 +37,14 @@ esp_err_t power_meter_read(power_meter_reading_t *out);
 /** 芯片是否已成功初始化。 */
 bool power_meter_is_ready(void);
 
-/** 电流寄存器分辨率 (A)，即 1 LSB 对应电流。 */
+/** 分流 ADC 换算的电流分辨率 (A)，随精细/粗量程变化。 */
 float power_meter_current_resolution_a(void);
 
 /** 按分辨率格式化为带单位的字符串（A / mA / uA）。 */
 void power_meter_format_current(float current_a, char *buf, size_t buf_len);
+
+/** 格式化为 W 单位字符串（按量级 3~4 位小数，不切换 mW/uW）。 */
+void power_meter_format_power(float power_w, char *buf, size_t buf_len);
 
 #ifdef __cplusplus
 }

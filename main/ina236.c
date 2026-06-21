@@ -69,6 +69,11 @@ float ina236_get_current_lsb(const ina236_dev_t *dev)
     return dev ? dev->current_lsb : 0.0f;
 }
 
+float ina236_shunt_current_resolution_a(ina236_range_t range)
+{
+    return shunt_lsb_v(range) / INA236_RSHUNT_OHM;
+}
+
 static uint16_t calc_shunt_cal(float current_lsb, ina236_range_t range)
 {
     float cal = 0.00512f / (current_lsb * INA236_RSHUNT_OHM);
@@ -234,8 +239,9 @@ esp_err_t ina236_init(ina236_dev_t *dev, i2c_port_t port, gpio_num_t alert_gpio)
         ESP_ERROR_CHECK(gpio_config(&io));
     }
 
-    ESP_LOGI(TAG, "INA236 @ 0x%02X, Rshunt=%.4f ohm, I_LSB=%.1f uA, 起始量程=±20.48mV",
-             dev->i2c_addr, (double)INA236_RSHUNT_OHM, (double)(dev->current_lsb * 1e6f));
+    const float shunt_i_lsb = ina236_shunt_current_resolution_a(INA236_RANGE_FINE);
+    ESP_LOGI(TAG, "INA236 @ 0x%02X, Rshunt=%.4f ohm, 分流电流分辨率=%.1f uA, 起始量程=±20.48mV",
+             dev->i2c_addr, (double)INA236_RSHUNT_OHM, (double)(shunt_i_lsb * 1e6f));
     return ESP_OK;
 }
 
@@ -311,8 +317,6 @@ esp_err_t ina236_read(ina236_dev_t *dev, ina236_reading_t *out)
 
     uint16_t raw_shunt = 0;
     uint16_t raw_bus   = 0;
-    uint16_t raw_curr  = 0;
-    uint16_t raw_power = 0;
     uint16_t mask      = 0;
 
     esp_err_t err = reg_read_u16(dev, REG_SHUNT_VOLT, &raw_shunt);
@@ -323,23 +327,14 @@ esp_err_t ina236_read(ina236_dev_t *dev, ina236_reading_t *out)
     if (err != ESP_OK) {
         return err;
     }
-    err = reg_read_u16(dev, REG_CURRENT, &raw_curr);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = reg_read_u16(dev, REG_POWER, &raw_power);
-    if (err != ESP_OK) {
-        return err;
-    }
     (void)reg_read_u16(dev, REG_MASK_ENABLE, &mask);
 
     const int16_t shunt_signed = (int16_t)raw_shunt;
-    const int16_t curr_signed  = (int16_t)raw_curr;
 
     out->shunt_v   = (float)shunt_signed * shunt_lsb_v(dev->range);
     out->bus_v     = (float)(raw_bus & 0x7FFFu) * BUS_VOLT_LSB_V;
-    out->current_a = (float)curr_signed * dev->current_lsb;
-    out->power_w   = (float)raw_power * 32.0f * dev->current_lsb;
+    out->current_a = out->shunt_v / INA236_RSHUNT_OHM;
+    out->power_w   = out->current_a * out->bus_v;
     out->overflow  = (mask & MASK_OVF) != 0;
     out->range     = dev->range;
     return ESP_OK;
