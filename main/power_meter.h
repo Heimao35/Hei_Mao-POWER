@@ -1,6 +1,6 @@
 /**
  * @file power_meter.h
- * @brief 功率计测量接口（INA236：电压/电流/功率，ALERT 自动量程）。
+ * @brief 功率计测量接口（双 INA236 + MOS 通路切换，ALERT 自动量程）。
  */
 #ifndef POWER_METER_H
 #define POWER_METER_H
@@ -15,9 +15,18 @@
 extern "C" {
 #endif
 
-#ifndef POWER_METER_ALERT_GPIO
-#define POWER_METER_ALERT_GPIO  GPIO_NUM_14
-#endif
+/** 芯片1（大电流，5 mΩ）ALERT 引脚 */
+#define POWER_METER_ALERT_HI_GPIO  GPIO_NUM_17
+/** 芯片2（微电流，100 Ω）ALERT 引脚 */
+#define POWER_METER_ALERT_LO_GPIO  GPIO_NUM_18
+/** 采样通路 MOS 控制：高电平导通 → 芯片1 接入 */
+#define POWER_METER_MOS_GPIO       GPIO_NUM_21
+
+/** 测量通路 */
+typedef enum {
+    POWER_METER_PATH_HIGH = 0, /**< MOS 导通，芯片1（5 mΩ） */
+    POWER_METER_PATH_LOW  = 1, /**< MOS 关断，芯片2（100 Ω） */
+} power_meter_path_t;
 
 /** 单次测量结果 */
 typedef struct {
@@ -26,9 +35,10 @@ typedef struct {
     float power_w;    /**< 功率 (W) */
     bool  range_fine; /**< true=±20.48mV 精细量程, false=±81.92mV */
     bool  overflow;   /**< 芯片数学溢出（量程可能不足） */
+    power_meter_path_t path; /**< 当前测量通路 */
 } power_meter_reading_t;
 
-/** 初始化 INA236 并启用 GPIO ALERT 自动量程。 */
+/** 初始化双 INA236、MOS 通路及 ALERT 自动量程。上电默认 MOS 导通（大电流通路）。 */
 esp_err_t power_meter_init(i2c_port_t port);
 
 /** 读取当前电压、电流、功率。 */
@@ -37,7 +47,13 @@ esp_err_t power_meter_read(power_meter_reading_t *out);
 /** 芯片是否已成功初始化。 */
 bool power_meter_is_ready(void);
 
-/** 分流 ADC 换算的电流分辨率 (A)，随精细/粗量程变化。 */
+/**
+ * 启用/禁用自动量程与通路切换（含 ALERT 中断触发）。
+ * 默认禁用；开机动画全部结束后再启用，避免打断启动提示音。
+ */
+void power_meter_set_auto_range_enabled(bool enabled);
+
+/** 分流 ADC 换算的电流分辨率 (A)，随通路及精细/粗量程变化。 */
 float power_meter_current_resolution_a(void);
 
 /** 按分辨率格式化为带单位的字符串（A / mA / uA）。 */

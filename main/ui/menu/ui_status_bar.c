@@ -146,10 +146,17 @@ static void boot_anim_status_y(void *var, int32_t v)
     }
 }
 
+static void (*s_boot_ready_cb)(void);
+
 static void boot_anim_ready_cb(lv_anim_t *a)
 {
     (void)a;
     status_bar_relayout();
+    if (s_boot_ready_cb) {
+        void (*cb)(void) = s_boot_ready_cb;
+        s_boot_ready_cb  = NULL;
+        cb();
+    }
 }
 
 typedef struct {
@@ -302,12 +309,16 @@ void ui_status_bar_sync_pd(bool enabled)
     post_pd_visible(enabled);
 }
 
-void ui_status_bar_boot_slide_in(void)
+void ui_status_bar_boot_slide_in(void (*on_ready)(void))
 {
     if (!s_host) {
+        if (on_ready) {
+            on_ready();
+        }
         return;
     }
 
+    s_boot_ready_cb = on_ready;
     status_bar_relayout();
 
     const lv_coord_t y_target = UI_STATUS_STRIP_Y;

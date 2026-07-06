@@ -1,6 +1,6 @@
 /**
  * @file buzzer.c
- * @brief GPIO17 无源蜂鸣器：LEDC PWM + esp_timer 非阻塞节拍/旋律。
+ * @brief GPIO14 无源蜂鸣器：LEDC PWM + esp_timer 非阻塞节拍/旋律。
  */
 #include "buzzer.h"
 

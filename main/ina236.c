@@ -50,12 +50,16 @@ static float shunt_lsb_v(ina236_range_t range)
     return (range == INA236_RANGE_FINE) ? SHUNT_LSB_FINE : SHUNT_LSB_COARSE;
 }
 
-static float pick_current_lsb(void)
+static float pick_current_lsb(float imax_a)
 {
-    const float min_lsb = INA236_IMAX_A / 32768.0f;
+    const float min_lsb = imax_a / 32768.0f;
     const float max_lsb = 8.0f * min_lsb;
     /* 从小到大选取满足数据手册约束的最细 LSB */
-    const float candidates[] = {50e-6f, 100e-6f, 200e-6f, 250e-6f, 500e-6f, 1e-3f};
+    const float candidates[] = {
+        1e-9f, 5e-9f, 10e-9f, 25e-9f, 50e-9f, 100e-9f, 200e-9f, 250e-9f,
+        500e-9f, 1e-6f, 2e-6f, 5e-6f, 10e-6f, 25e-6f, 50e-6f, 100e-6f,
+        200e-6f, 250e-6f, 500e-6f, 1e-3f,
+    };
     for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
         if (candidates[i] >= min_lsb && candidates[i] <= max_lsb) {
             return candidates[i];
@@ -69,14 +73,17 @@ float ina236_get_current_lsb(const ina236_dev_t *dev)
     return dev ? dev->current_lsb : 0.0f;
 }
 
-float ina236_shunt_current_resolution_a(ina236_range_t range)
+float ina236_shunt_current_resolution_a(ina236_range_t range, float rshunt_ohm)
 {
-    return shunt_lsb_v(range) / INA236_RSHUNT_OHM;
+    if (rshunt_ohm <= 0.0f) {
+        return 0.0f;
+    }
+    return shunt_lsb_v(range) / rshunt_ohm;
 }
 
-static uint16_t calc_shunt_cal(float current_lsb, ina236_range_t range)
+static uint16_t calc_shunt_cal(float current_lsb, float rshunt_ohm, ina236_range_t range)
 {
-    float cal = 0.00512f / (current_lsb * INA236_RSHUNT_OHM);
+    float cal = 0.00512f / (current_lsb * rshunt_ohm);
     if (range == INA236_RANGE_FINE) {
         cal /= 4.0f;
     }
@@ -172,46 +179,46 @@ int16_t ina236_shunt_v_to_limit(ina236_range_t range, float shunt_v)
     return (int16_t)((scaled >= 0.0f) ? (scaled + 0.5f) : (scaled - 0.5f));
 }
 
-esp_err_t ina236_init(ina236_dev_t *dev, i2c_port_t port, gpio_num_t alert_gpio)
+esp_err_t ina236_init(ina236_dev_t *dev, i2c_port_t port, gpio_num_t alert_gpio,
+                      const uint8_t *addr_candidates, size_t addr_count,
+                      float rshunt_ohm, float imax_a)
 {
-    if (!dev) {
+    if (!dev || !addr_candidates || addr_count == 0 || rshunt_ohm <= 0.0f || imax_a <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
     }
+
     memset(dev, 0, sizeof(*dev));
     dev->i2c_port    = port;
     dev->alert_gpio  = alert_gpio;
-    dev->current_lsb = pick_current_lsb();
+    dev->rshunt_ohm  = rshunt_ohm;
+    dev->imax_a      = imax_a;
+    dev->current_lsb = pick_current_lsb(imax_a);
 
     if (!i2c_bus_share_lock(pdMS_TO_TICKS(200))) {
         return ESP_ERR_TIMEOUT;
     }
 
-    esp_err_t err = probe_addr(port, INA236_ADDR_A0_GND_A, NULL, NULL);
-    if (err == ESP_OK) {
-        dev->i2c_addr = INA236_ADDR_A0_GND_A;
-    } else {
+    esp_err_t err = ESP_ERR_NOT_FOUND;
+    for (size_t i = 0; i < addr_count; i++) {
         uint16_t mfg = 0;
         uint16_t dev_id = 0;
-        esp_err_t err_b = probe_addr(port, INA236_ADDR_A0_GND_B, &mfg, &dev_id);
-        if (err_b == ESP_OK) {
-            dev->i2c_addr = INA236_ADDR_A0_GND_B;
+        esp_err_t probe = probe_addr(port, addr_candidates[i], &mfg, &dev_id);
+        if (probe == ESP_OK) {
+            dev->i2c_addr = addr_candidates[i];
             err = ESP_OK;
-        } else if (err == ESP_ERR_NOT_FOUND) {
-            ESP_LOGW(TAG, "0x%02X: mfg/dev 不匹配", INA236_ADDR_A0_GND_A);
-        } else {
-            ESP_LOGW(TAG, "0x%02X: I2C %s", INA236_ADDR_A0_GND_A, esp_err_to_name(err));
+            break;
         }
-        if (err_b == ESP_ERR_NOT_FOUND) {
+        if (probe == ESP_ERR_NOT_FOUND) {
             ESP_LOGW(TAG, "0x%02X: mfg=0x%04X dev=0x%04X (期望 mfg=0x5449 dev≈0xA080)",
-                     INA236_ADDR_A0_GND_B, mfg, dev_id);
-        } else if (err != ESP_OK && err_b != ESP_OK) {
-            ESP_LOGW(TAG, "0x%02X: I2C %s", INA236_ADDR_A0_GND_B, esp_err_to_name(err_b));
+                     addr_candidates[i], mfg, dev_id);
+        } else {
+            ESP_LOGW(TAG, "0x%02X: I2C %s", addr_candidates[i], esp_err_to_name(probe));
         }
     }
     i2c_bus_share_unlock();
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "未检测到 INA236 (A0=GND, 地址 0x40/0x48)");
+        ESP_LOGE(TAG, "未检测到 INA236");
         return err;
     }
 
@@ -239,9 +246,9 @@ esp_err_t ina236_init(ina236_dev_t *dev, i2c_port_t port, gpio_num_t alert_gpio)
         ESP_ERROR_CHECK(gpio_config(&io));
     }
 
-    const float shunt_i_lsb = ina236_shunt_current_resolution_a(INA236_RANGE_FINE);
-    ESP_LOGI(TAG, "INA236 @ 0x%02X, Rshunt=%.4f ohm, 分流电流分辨率=%.1f uA, 起始量程=±20.48mV",
-             dev->i2c_addr, (double)INA236_RSHUNT_OHM, (double)(shunt_i_lsb * 1e6f));
+    const float shunt_i_lsb = ina236_shunt_current_resolution_a(INA236_RANGE_FINE, rshunt_ohm);
+    ESP_LOGI(TAG, "INA236 @ 0x%02X, Rshunt=%.4g ohm, Imax=%.4g A, 分流分辨率=%.2g A, 起始量程=±20.48mV",
+             dev->i2c_addr, (double)rshunt_ohm, (double)imax_a, (double)shunt_i_lsb);
     return ESP_OK;
 }
 
@@ -255,7 +262,7 @@ esp_err_t ina236_set_range(ina236_dev_t *dev, ina236_range_t range)
     }
 
     dev->range     = range;
-    dev->shunt_cal = calc_shunt_cal(dev->current_lsb, range);
+    dev->shunt_cal = calc_shunt_cal(dev->current_lsb, dev->rshunt_ohm, range);
 
     esp_err_t err = write_config_mode(dev, range);
     if (err != ESP_OK) {
@@ -333,7 +340,7 @@ esp_err_t ina236_read(ina236_dev_t *dev, ina236_reading_t *out)
 
     out->shunt_v   = (float)shunt_signed * shunt_lsb_v(dev->range);
     out->bus_v     = (float)(raw_bus & 0x7FFFu) * BUS_VOLT_LSB_V;
-    out->current_a = out->shunt_v / INA236_RSHUNT_OHM;
+    out->current_a = out->shunt_v / dev->rshunt_ohm;
     out->power_w   = out->current_a * out->bus_v;
     out->overflow  = (mask & MASK_OVF) != 0;
     out->range     = dev->range;

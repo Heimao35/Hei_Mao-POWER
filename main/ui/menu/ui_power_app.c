@@ -594,7 +594,7 @@ void ui_power_app_init(void)
 {
     ui_power_app_prepare_hidden();
     lv_obj_set_style_opa(s_ctx.main_panel, LV_OPA_COVER, LV_PART_MAIN);
-    ui_status_bar_boot_slide_in();
+    ui_status_bar_boot_slide_in(NULL);
 }
 
 lv_obj_t *ui_power_app_get_screen(void)
@@ -746,5 +746,5 @@ void ui_power_app_fade_in(void)
     lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
     lv_anim_start(&a);
 
-    ui_status_bar_boot_slide_in();
+    ui_status_bar_boot_slide_in(NULL);
 }

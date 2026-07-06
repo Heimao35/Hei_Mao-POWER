@@ -10,6 +10,7 @@
 #include "ui_power_config.h"
 #include "ui_status_bar.h"
 #include "buzzer.h"
+#include "power_meter.h"
 
 #include "lvgl.h"
 
@@ -85,10 +86,15 @@ static void boot_cleanup_panel(void)
     }
 }
 
+static void boot_enable_auto_range(void)
+{
+    power_meter_set_auto_range_enabled(true);
+}
+
 static void boot_after_slide(void)
 {
     boot_cleanup_panel();
-    ui_status_bar_boot_slide_in();
+    ui_status_bar_boot_slide_in(boot_enable_auto_range);
     memset(&s_boot, 0, sizeof(s_boot));
 }
 
@@ -97,7 +103,7 @@ static void boot_begin_transition(void *p)
     (void)p;
 
     if (!s_boot.panel || !lv_obj_is_valid(s_boot.panel)) {
-        ui_status_bar_boot_slide_in();
+        ui_status_bar_boot_slide_in(boot_enable_auto_range);
         memset(&s_boot, 0, sizeof(s_boot));
         return;
     }
@@ -320,6 +326,7 @@ void ui_boot_splash_play(void)
     logo_col_place_arc_center(logo_col, arc, s_boot.subtitle, bar, scr_w, scr_h);
     lv_obj_update_layout(panel);
 
+    power_meter_set_auto_range_enabled(false);
     buzzer_play_boot_melody();
 
     lv_anim_t kick;

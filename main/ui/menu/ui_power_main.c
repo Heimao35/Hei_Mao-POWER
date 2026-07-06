@@ -26,8 +26,27 @@
 
 /** 固定档位跨度：按窗口峰峰值选档，居中显示 */
 static const float s_span_v[] = {0.5f, 2.0f, 8.0f, 30.0f};
-static const float s_span_i[] = {0.05f, 0.2f, 1.0f, 5.5f};
-static const float s_span_p[] = {2.0f, 10.0f, 40.0f, 150.0f};
+/** 电流 (A)：含 µA 档以支持芯片2 微电流通路 */
+static const float s_span_i[] = {
+    100e-6f,  /* 100 µA */
+    500e-6f,  /* 500 µA */
+    2e-3f,    /* 2 mA */
+    50e-3f,   /* 50 mA */
+    0.2f,
+    1.0f,
+    5.5f,
+};
+/** 功率 (W)：含 mW 档以配合微电流显示 */
+static const float s_span_p[] = {
+    2e-3f,    /* 2 mW */
+    10e-3f,   /* 10 mW */
+    50e-3f,   /* 50 mW */
+    0.5f,
+    2.0f,
+    10.0f,
+    40.0f,
+    150.0f,
+};
 
 typedef struct {
     float    buf[CHART_POINT_COUNT];
@@ -56,6 +75,8 @@ static lv_coord_t           s_scr_w;
 static chart_hist_t         s_hist_v;
 static chart_hist_t         s_hist_i;
 static chart_hist_t         s_hist_p;
+static power_meter_path_t   s_chart_path;
+static bool                 s_chart_path_valid;
 
 static lv_coord_t num_value_w(void)
 {
@@ -232,7 +253,7 @@ static void chart_hist_update_tier(chart_hist_t *h, const float *spans, uint8_t 
         h->tier_idx = need;
     } else if (need < h->tier_idx && h->tier_idx > 0) {
         if (peak <= spans[h->tier_idx - 1] * 0.65f) {
-            h->tier_idx--;
+            h->tier_idx = need;
         }
     }
 
@@ -431,17 +452,41 @@ static void update_readings(power_meter_reading_t *rd, char *v_buf, size_t v_len
     power_meter_format_power(rd->power_w, p_buf, p_len);
 }
 
+static void format_span_i(char *buf, size_t len, float span_a)
+{
+    if (span_a >= 1.0f) {
+        (void)snprintf(buf, len, "%.2g A", (double)span_a);
+    } else if (span_a >= 1e-3f) {
+        (void)snprintf(buf, len, "%.2g mA", (double)(span_a * 1000.0f));
+    } else {
+        (void)snprintf(buf, len, "%.0f uA", (double)(span_a * 1e6f));
+    }
+}
+
+static void format_span_p(char *buf, size_t len, float span_w)
+{
+    if (span_w >= 1.0f) {
+        (void)snprintf(buf, len, "%.0f W", (double)span_w);
+    } else if (span_w >= 1e-3f) {
+        (void)snprintf(buf, len, "%.2g mW", (double)(span_w * 1000.0f));
+    } else {
+        (void)snprintf(buf, len, "%.0f uW", (double)(span_w * 1e6f));
+    }
+}
+
 static void chart_update_scale_label(void)
 {
     if (!s_lbl_chart_scale || !lv_obj_is_valid(s_lbl_chart_scale)) {
         return;
     }
+    char i_span[24];
+    char p_span[24];
+    format_span_i(i_span, sizeof(i_span), s_span_i[s_hist_i.tier_idx]);
+    format_span_p(p_span, sizeof(p_span), s_span_p[s_hist_p.tier_idx]);
     char buf[128];
     (void)snprintf(buf, sizeof(buf),
-                     "V span %.1g  |  I span %.2g A  |  P span %.0f W",
-                     (double)s_span_v[s_hist_v.tier_idx],
-                     (double)s_span_i[s_hist_i.tier_idx],
-                     (double)s_span_p[s_hist_p.tier_idx]);
+                     "V span %.1g  |  I span %s  |  P span %s",
+                     (double)s_span_v[s_hist_v.tier_idx], i_span, p_span);
     lv_label_set_text(s_lbl_chart_scale, buf);
 }
 
@@ -481,13 +526,23 @@ static void chart_push_sample(float v, float i, float p)
 {
     chart_hist_push(&s_hist_v, v);
     chart_hist_push(&s_hist_i, i);
-    chart_hist_push(&s_hist_p, p);
+    chart_hist_push(&s_hist_p, fabsf(p));
 
     chart_hist_update_tier(&s_hist_v, s_span_v, (uint8_t)(sizeof(s_span_v) / sizeof(s_span_v[0])));
     chart_hist_update_tier(&s_hist_i, s_span_i, (uint8_t)(sizeof(s_span_i) / sizeof(s_span_i[0])));
     chart_hist_update_tier(&s_hist_p, s_span_p, (uint8_t)(sizeof(s_span_p) / sizeof(s_span_p[0])));
 
     chart_redraw_from_hist();
+}
+
+static void chart_on_path_changed(power_meter_path_t path)
+{
+    if (s_chart_path_valid && path == s_chart_path) {
+        return;
+    }
+    s_chart_path       = path;
+    s_chart_path_valid = true;
+    chart_hist_reset_all();
 }
 
 void ui_power_main_create(lv_obj_t *parent)
@@ -592,6 +647,8 @@ void ui_power_main_refresh(void)
             lv_obj_add_flag(panel, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
         }
     }
+
+    chart_on_path_changed(rd.path);
 
     if (s_mode != UI_POWER_VIEW_CHART) {
         return;

@@ -15,27 +15,19 @@
 extern "C" {
 #endif
 
-/** A0=GND 时 7 位 I2C 地址（INA236A / INA236B） */
+/** INA236A：A0 引脚接 GND / VS / SDA / SCL 时的 7 位 I2C 地址 */
 #define INA236_ADDR_A0_GND_A  0x40
+#define INA236_ADDR_A0_VS_A   0x41
+#define INA236_ADDR_A0_SDA_A  0x42
+#define INA236_ADDR_A0_SCL_A  0x43
+
+/** INA236B：A0 引脚接 GND / VS / SDA / SCL 时的 7 位 I2C 地址 */
 #define INA236_ADDR_A0_GND_B  0x48
+#define INA236_ADDR_A0_VS_B   0x49
+#define INA236_ADDR_A0_SDA_B  0x4A
+#define INA236_ADDR_A0_SCL_B  0x4B
 
-/** 分流电阻阻值 (Ω)，按硬件修改 */
-#ifndef INA236_RSHUNT_OHM
-#define INA236_RSHUNT_OHM  0.008f
-#endif
-
-/** 设计最大测量电流 (A)，用于 SHUNT_CAL / CURRENT 寄存器校准 */
-#ifndef INA236_IMAX_A
-#define INA236_IMAX_A  7.0f
-#endif
-
-/**
- * 测量精度参考（依赖 RSHUNT 与量程）：
- * - 应用层电流由分流 ADC 换算：I = V_shunt / RSHUNT
- * - 精细量程：625 nV/LSB → I_LSB = 625e-9 / RSHUNT
- * - 粗量程：2.5 µV/LSB → I_LSB = 2.5e-6 / RSHUNT
- * - 零点偏移：±5 µV / RSHUNT（数据手册最大偏移）
- */
+/** 分流 ADC 零点偏移上限 (V)，数据手册 ±5 µV */
 #define INA236_SHUNT_OFFSET_V_MAX  5.0e-6f
 
 typedef enum {
@@ -61,25 +53,27 @@ typedef struct {
 } ina236_reading_t;
 
 typedef struct {
-    i2c_port_t    i2c_port;
-    uint8_t       i2c_addr;
-    gpio_num_t    alert_gpio;
+    i2c_port_t     i2c_port;
+    uint8_t        i2c_addr;
+    gpio_num_t     alert_gpio;
     ina236_range_t range;
-    float         current_lsb;
-    uint16_t      shunt_cal;
-    bool          present;
+    float          rshunt_ohm;
+    float          imax_a;
+    float          current_lsb;
+    uint16_t       shunt_cal;
+    bool           present;
 } ina236_dev_t;
+
+/** 按候选地址表探测并初始化 INA236（校验 Manufacturer / Device ID）。 */
+esp_err_t ina236_init(ina236_dev_t *dev, i2c_port_t port, gpio_num_t alert_gpio,
+                      const uint8_t *addr_candidates, size_t addr_count,
+                      float rshunt_ohm, float imax_a);
 
 /** 返回 SHUNT_CAL 使用的 CURRENT 寄存器 LSB (A)。 */
 float ina236_get_current_lsb(const ina236_dev_t *dev);
 
 /** 分流 ADC 换算的电流分辨率 (A)：shunt_voltage_lsb / RSHUNT。 */
-float ina236_shunt_current_resolution_a(ina236_range_t range);
-
-/**
- * @brief 探测并初始化 INA236（校验 Manufacturer / Device ID）。
- */
-esp_err_t ina236_init(ina236_dev_t *dev, i2c_port_t port, gpio_num_t alert_gpio);
+float ina236_shunt_current_resolution_a(ina236_range_t range, float rshunt_ohm);
 
 /**
  * @brief 设置分流 ADC 量程并更新校准寄存器。

@@ -1,6 +1,6 @@
 /**
  * @file buzzer.h
- * @brief GPIO17 无源蜂鸣器，非阻塞节拍/旋律播放。
+ * @brief GPIO14 无源蜂鸣器，非阻塞节拍/旋律播放。
  */
 #ifndef BUZZER_H
 #define BUZZER_H
@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define BUZZER_GPIO GPIO_NUM_17
+#define BUZZER_GPIO GPIO_NUM_14
 
 /** 单音节：freq_hz=音高(Hz)，duration_ms=时长(ms)；freq_hz=0 为休止。 */
 typedef struct {
