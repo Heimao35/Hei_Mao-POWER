@@ -88,6 +88,9 @@ esp_err_t ina236_config_alert(ina236_dev_t *dev, ina236_alert_func_t func, int16
 /** 读取 Mask/Enable 并清除转换就绪/报警锁存（读寄存器 0x06）。 */
 esp_err_t ina236_read_mask_enable(ina236_dev_t *dev, uint16_t *mask_enable);
 
+/** 关闭 ALERT 比较输出（非活动通路芯片用，避免切换后引脚持续触发）。 */
+esp_err_t ina236_disable_alert(ina236_dev_t *dev);
+
 /** 读取电压、电流、功率。 */
 esp_err_t ina236_read(ina236_dev_t *dev, ina236_reading_t *out);
 

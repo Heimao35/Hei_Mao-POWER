@@ -21,6 +21,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 static const char *TAG = "power_meter";
 
@@ -37,13 +38,17 @@ static const char *TAG = "power_meter";
 /** 粗量程 (±81.92 mV) 下切阈值（带迟滞） */
 #define RANGE_DOWN_SHUNT_V  0.004f
 
-/** 通路切换迟滞（A）：大→小 1 mA，小→大 850 µA（芯片2 粗量程上限约 819 µA） */
+/** 通路切换迟滞（A）：小→大 800 µA（芯片2），大→小 1 mA（芯片1 零点噪声约 ±1 mA） */
+#define PATH_UP_A    8.0e-4f
 #define PATH_DOWN_A  1.0e-3f
-#define PATH_UP_A    8.5e-4f
 /** 连续满足阈值的采样次数，抑制抖动 */
 #define PATH_SWITCH_STABLE_COUNT  3
-/** MOS 切换后模拟稳定等待 (ms) */
-#define PATH_SETTLE_MS  25
+/** MOS 切换后模拟稳定等待 (ms)，非阻塞计时 */
+#define PATH_SETTLE_MS  50
+/** 通路切换后禁止再次切换 (ms) */
+#define PATH_SWITCH_COOLDOWN_MS  1000
+/** 小→大升档后保持大电流通路最短时间 (ms)，避免芯片1 零点噪声立即降档 */
+#define PATH_HIGH_HOLD_MS  2000
 
 static const uint8_t s_addr_hi[] = { INA236_ADDR_A0_GND_A, INA236_ADDR_A0_GND_B };
 static const uint8_t s_addr_lo[] = { INA236_ADDR_A0_VS_A, INA236_ADDR_A0_VS_B };
@@ -57,6 +62,46 @@ static SemaphoreHandle_t s_alert_sem;
 static TaskHandle_t      s_alert_task;
 static uint8_t           s_path_stable_cnt;
 static int8_t              s_path_pending; /**< -1 待降档, +1 待升档, 0 无 */
+static TickType_t        s_path_cooldown_until;
+static TickType_t        s_path_settle_until;
+static TickType_t        s_high_path_hold_until;
+static volatile bool     s_path_switch_busy;
+
+static bool path_in_cooldown(void)
+{
+    return (int32_t)(xTaskGetTickCount() - s_path_cooldown_until) < 0;
+}
+
+static bool path_is_settling(void)
+{
+    return (int32_t)(xTaskGetTickCount() - s_path_settle_until) < 0;
+}
+
+static bool path_in_high_hold(void)
+{
+    return s_active_path == POWER_METER_PATH_HIGH &&
+           (int32_t)(xTaskGetTickCount() - s_high_path_hold_until) < 0;
+}
+
+static bool auto_range_paused(void)
+{
+    return path_in_cooldown() || path_is_settling() || s_path_switch_busy;
+}
+
+static void path_arm_cooldown(void)
+{
+    s_path_cooldown_until = xTaskGetTickCount() + pdMS_TO_TICKS(PATH_SWITCH_COOLDOWN_MS);
+}
+
+static void clear_chip_alert_latch_locked(ina236_dev_t *dev)
+{
+    if (!dev->present) {
+        return;
+    }
+    uint16_t mask = 0;
+    (void)ina236_read_mask_enable(dev, &mask);
+    (void)mask;
+}
 
 static ina236_dev_t *active_dev(void)
 {
@@ -112,26 +157,45 @@ static esp_err_t configure_active_chip(ina236_dev_t *dev, ina236_range_t range)
 
 static esp_err_t switch_path(power_meter_path_t path, ina236_range_t start_range, bool play_buzzer)
 {
+    if (s_path_switch_busy) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     const power_meter_path_t prev = s_active_path;
     if (prev == path) {
         return ESP_OK;
     }
 
     const bool to_high = (path == POWER_METER_PATH_HIGH);
+    s_path_switch_busy = true;
+
+    /* 先更新通路状态，避免切换等待期间 ALERT/读数逻辑重复触发 */
+    s_active_path       = path;
+    s_path_stable_cnt   = 0;
+    s_path_pending      = 0;
+    s_path_settle_until = xTaskGetTickCount() + pdMS_TO_TICKS(PATH_SETTLE_MS);
+
     mos_set_high_path(to_high);
-    vTaskDelay(pdMS_TO_TICKS(PATH_SETTLE_MS));
 
-    s_active_path = path;
-    s_path_stable_cnt = 0;
-    s_path_pending = 0;
-
-    ina236_dev_t *dev = active_dev();
-    esp_err_t err = configure_active_chip(dev, start_range);
-    if (err != ESP_OK) {
-        return err;
+    if (to_high) {
+        s_high_path_hold_until = xTaskGetTickCount() + pdMS_TO_TICKS(PATH_HIGH_HOLD_MS);
+        start_range            = INA236_RANGE_FINE;
     }
 
-    if (s_inited && play_buzzer) {
+    ina236_dev_t *dev      = active_dev();
+    ina236_dev_t *inactive = to_high ? &s_ina_lo : &s_ina_hi;
+
+    esp_err_t err = configure_active_chip(dev, start_range);
+    if (err == ESP_OK && i2c_bus_share_lock(pdMS_TO_TICKS(100))) {
+        clear_chip_alert_latch_locked(&s_ina_hi);
+        clear_chip_alert_latch_locked(&s_ina_lo);
+        (void)ina236_disable_alert(inactive);
+        i2c_bus_share_unlock();
+    }
+
+    path_arm_cooldown();
+
+    if (err == ESP_OK && s_inited && play_buzzer) {
         if (to_high) {
             buzzer_play_pattern(BUZZER_PATTERN_RANGE_UP);
         } else {
@@ -139,12 +203,16 @@ static esp_err_t switch_path(power_meter_path_t path, ina236_range_t start_range
         }
     }
 
-    ESP_LOGI(TAG, "通路切换 → %s (MOS=%s, INA236 @ 0x%02X, %s)",
-             to_high ? "大电流/芯片1" : "微电流/芯片2",
-             to_high ? "导通" : "关断",
-             dev->i2c_addr,
-             start_range == INA236_RANGE_FINE ? "±20.48mV" : "±81.92mV");
-    return ESP_OK;
+    s_path_switch_busy = false;
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "通路切换 → %s (MOS=%s, INA236 @ 0x%02X, %s)",
+                 to_high ? "大电流/芯片1" : "微电流/芯片2",
+                 to_high ? "导通" : "关断",
+                 dev->i2c_addr,
+                 start_range == INA236_RANGE_FINE ? "±20.48mV" : "±81.92mV");
+    }
+    return err;
 }
 
 static void clear_chip_alert_latch(ina236_dev_t *dev)
@@ -159,7 +227,7 @@ static void clear_chip_alert_latch(ina236_dev_t *dev)
 
 static void process_chip_alert(ina236_dev_t *dev)
 {
-    if (!s_auto_range_enabled || !dev->present || dev != active_dev()) {
+    if (!s_auto_range_enabled || auto_range_paused() || !dev->present || dev != active_dev()) {
         return;
     }
 
@@ -184,8 +252,13 @@ static void process_chip_alert(ina236_dev_t *dev)
     }
 
     if (cur == INA236_RANGE_FINE && sol) {
-        ESP_LOGI(TAG, "ALERT 0x%02X: 分流过压 → ±81.92mV", dev->i2c_addr);
-        (void)switch_chip_range(dev, INA236_RANGE_COARSE, true);
+        if (s_active_path == POWER_METER_PATH_LOW) {
+            ESP_LOGI(TAG, "ALERT 0x%02X: 芯片2 精细量程饱和 → ±81.92mV", dev->i2c_addr);
+            (void)switch_chip_range(dev, INA236_RANGE_COARSE, true);
+        } else if (s_active_path == POWER_METER_PATH_HIGH) {
+            ESP_LOGI(TAG, "ALERT 0x%02X: 分流过压 → ±81.92mV", dev->i2c_addr);
+            (void)switch_chip_range(dev, INA236_RANGE_COARSE, true);
+        }
     } else if (cur == INA236_RANGE_COARSE && sul) {
         ESP_LOGI(TAG, "ALERT 0x%02X: 分流欠压 → ±20.48mV", dev->i2c_addr);
         (void)switch_chip_range(dev, INA236_RANGE_FINE, true);
@@ -218,14 +291,20 @@ static void alert_worker_task(void *arg)
 
 static void evaluate_path_switch(const ina236_reading_t *raw)
 {
-    if (!s_auto_range_enabled) {
+    if (!s_auto_range_enabled || auto_range_paused()) {
         return;
     }
 
     const float abs_i = fabsf(raw->current_a);
 
     if (s_active_path == POWER_METER_PATH_HIGH) {
-        /* 大电流通路：低于下阈值时准备切至微电流芯片 */
+        if (path_in_high_hold()) {
+            s_path_pending    = 0;
+            s_path_stable_cnt = 0;
+            return;
+        }
+
+        /* 大电流通路：芯片1 读数低于下阈值时切至微电流芯片 */
         if (abs_i < PATH_DOWN_A && !raw->overflow) {
             if (s_path_pending != -1) {
                 s_path_pending = -1;
@@ -233,7 +312,7 @@ static void evaluate_path_switch(const ina236_reading_t *raw)
             } else {
                 s_path_stable_cnt++;
             }
-            if (s_path_stable_cnt >= PATH_SWITCH_STABLE_COUNT) {
+            if (s_path_stable_cnt >= PATH_SWITCH_STABLE_COUNT && s_ina_lo.present) {
                 ESP_LOGI(TAG, "电流 %.2f mA < 阈值，切换至微电流通路", (double)(abs_i * 1000.0f));
                 (void)switch_path(POWER_METER_PATH_LOW, INA236_RANGE_FINE, true);
             }
@@ -244,11 +323,11 @@ static void evaluate_path_switch(const ina236_reading_t *raw)
     } else {
         bool need_high = false;
 
-        if (raw->overflow && raw->range == INA236_RANGE_COARSE) {
+        if (raw->overflow) {
             need_high = true;
         } else if (abs_i > PATH_UP_A) {
             if (s_path_pending != 1) {
-                s_path_pending = 1;
+                s_path_pending    = 1;
                 s_path_stable_cnt = 1;
             } else {
                 s_path_stable_cnt++;
@@ -257,16 +336,13 @@ static void evaluate_path_switch(const ina236_reading_t *raw)
                 need_high = true;
             }
         } else {
-            s_path_pending = 0;
+            s_path_pending    = 0;
             s_path_stable_cnt = 0;
         }
 
         if (need_high) {
-            ESP_LOGI(TAG, "电流/溢出超阈值，切换至大电流通路");
-            const ina236_range_t start = (raw->overflow || abs_i > 1.0f)
-                                             ? INA236_RANGE_COARSE
-                                             : INA236_RANGE_FINE;
-            (void)switch_path(POWER_METER_PATH_HIGH, start, true);
+            ESP_LOGI(TAG, "电流 %.2f mA > 阈值，切换至大电流通路", (double)(abs_i * 1000.0f));
+            (void)switch_path(POWER_METER_PATH_HIGH, INA236_RANGE_FINE, true);
         }
     }
 }
@@ -278,13 +354,12 @@ static esp_err_t init_alert_isr(void)
         return ESP_ERR_NO_MEM;
     }
 
-    esp_err_t isr_svc = gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-    if (isr_svc != ESP_OK && isr_svc != ESP_ERR_INVALID_STATE) {
-        return isr_svc;
-    }
-
-    const gpio_num_t alert_pins[] = { POWER_METER_ALERT_HI_GPIO, POWER_METER_ALERT_LO_GPIO };
-    for (size_t i = 0; i < sizeof(alert_pins) / sizeof(alert_pins[0]); i++) {
+    const gpio_num_t alert_pins[2] = { POWER_METER_ALERT_HI_GPIO, POWER_METER_ALERT_LO_GPIO };
+    const ina236_dev_t *devs[2]    = { &s_ina_hi, &s_ina_lo };
+    for (size_t i = 0; i < 2; i++) {
+        if (!devs[i]->present) {
+            continue;
+        }
         gpio_isr_handler_add(alert_pins[i], alert_isr_handler, NULL);
         gpio_set_intr_type(alert_pins[i], GPIO_INTR_NEGEDGE);
     }
@@ -322,8 +397,8 @@ esp_err_t power_meter_init(i2c_port_t port)
     err = ina236_init(&s_ina_lo, port, POWER_METER_ALERT_LO_GPIO,
                       s_addr_lo, sizeof(s_addr_lo), RSHUNT_LO_OHM, IMAX_LO_A);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "芯片2 (微电流) 初始化失败: %s", esp_err_to_name(err));
-        return err;
+        ESP_LOGW(TAG, "芯片2 (微电流) 未就绪: %s，仅使用芯片1", esp_err_to_name(err));
+        memset(&s_ina_lo, 0, sizeof(s_ina_lo));
     }
 
     s_active_path = POWER_METER_PATH_HIGH;
@@ -361,7 +436,6 @@ esp_err_t power_meter_read(power_meter_reading_t *out)
     if (!s_inited || !s_ina_hi.present) {
         return ESP_ERR_INVALID_STATE;
     }
-
     ina236_dev_t *dev = active_dev();
 
     if (!i2c_bus_share_lock(pdMS_TO_TICKS(100))) {
@@ -382,11 +456,13 @@ esp_err_t power_meter_read(power_meter_reading_t *out)
     out->overflow   = raw.overflow;
     out->path       = s_active_path;
 
-    if (s_auto_range_enabled && raw.overflow && raw.range == INA236_RANGE_FINE) {
-        (void)switch_chip_range(dev, INA236_RANGE_COARSE, true);
+    if (s_auto_range_enabled && !auto_range_paused()) {
+        if (s_active_path == POWER_METER_PATH_HIGH && raw.overflow &&
+            raw.range == INA236_RANGE_FINE) {
+            (void)switch_chip_range(dev, INA236_RANGE_COARSE, true);
+        }
+        evaluate_path_switch(&raw);
     }
-
-    evaluate_path_switch(&raw);
 
     return ESP_OK;
 }
@@ -402,9 +478,12 @@ void power_meter_set_auto_range_enabled(bool enabled)
         return;
     }
 
-    s_auto_range_enabled = enabled;
-    s_path_stable_cnt    = 0;
-    s_path_pending       = 0;
+    s_auto_range_enabled  = enabled;
+    s_path_stable_cnt     = 0;
+    s_path_pending        = 0;
+    s_path_cooldown_until = 0;
+    s_path_settle_until   = 0;
+    s_high_path_hold_until = 0;
 
     if (!enabled || !s_inited) {
         return;

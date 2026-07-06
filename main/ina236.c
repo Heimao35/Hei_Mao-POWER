@@ -313,6 +313,14 @@ esp_err_t ina236_read_mask_enable(ina236_dev_t *dev, uint16_t *mask_enable)
     return reg_read_u16(dev, REG_MASK_ENABLE, mask_enable);
 }
 
+esp_err_t ina236_disable_alert(ina236_dev_t *dev)
+{
+    if (!dev || !dev->present) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return reg_write_u16(dev, REG_MASK_ENABLE, MASK_LEN);
+}
+
 esp_err_t ina236_read(ina236_dev_t *dev, ina236_reading_t *out)
 {
     if (!dev || !out) {

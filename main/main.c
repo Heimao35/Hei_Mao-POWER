@@ -569,14 +569,13 @@ void app_main(void)
 
     i2c_bus_share_init();
 
-    if (power_meter_init(TOUCH_HOST) != ESP_OK) {
-        ESP_LOGW(TAG, "功率计芯片初始化失败，请查看 ina236 / power_meter 日志");
+    /* CH224 须在功率计 MOS(GPIO21) 切换模拟通路之前完成探测与 5V 默认配置 */
+    if (pd_spoof_init(TOUCH_HOST) != ESP_OK) {
+        ESP_LOGW(TAG, "PD 诱骗芯片初始化失败");
     }
 
-    if (pd_spoof_init(TOUCH_HOST) != ESP_OK) {
-
-        ESP_LOGW(TAG, "PD 诱骗芯片初始化失败");
-
+    if (power_meter_init(TOUCH_HOST) != ESP_OK) {
+        ESP_LOGW(TAG, "功率计芯片初始化失败，请查看 ina236 / power_meter 日志");
     }
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
