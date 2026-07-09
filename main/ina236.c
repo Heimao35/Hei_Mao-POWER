@@ -9,6 +9,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include <math.h>
 #include <string.h>
 
 static const char *TAG = "ina236";
@@ -31,6 +32,10 @@ enum {
 
 #define CONFIG_MODE_CONT_SHUNT_BUS  0x07u
 #define CONFIG_ADCRANGE_SHIFT       12
+#define CONFIG_AVG_SHIFT            9
+#define CONFIG_VBUSCT_SHIFT         6
+#define CONFIG_VSHCT_SHIFT          3
+#define CONFIG_RESERVED_BITS        (0x2u << 13)
 
 #define MASK_SOL  (1u << 15)
 #define MASK_SUL  (1u << 14)
@@ -79,6 +84,19 @@ float ina236_shunt_current_resolution_a(ina236_range_t range, float rshunt_ohm)
         return 0.0f;
     }
     return shunt_lsb_v(range) / rshunt_ohm;
+}
+
+float ina236_cmrr_vos_per_vcm_v(float cmrr_db)
+{
+    return powf(10.0f, -cmrr_db / 20.0f);
+}
+
+float ina236_cmrr_zero_slope_a_per_v(float cmrr_db, float rshunt_ohm)
+{
+    if (rshunt_ohm <= 0.0f) {
+        return 0.0f;
+    }
+    return ina236_cmrr_vos_per_vcm_v(cmrr_db) / rshunt_ohm;
 }
 
 static uint16_t calc_shunt_cal(float current_lsb, float rshunt_ohm, ina236_range_t range)
@@ -149,20 +167,41 @@ static esp_err_t probe_addr(i2c_port_t port, uint8_t addr, uint16_t *mfg_out, ui
     return ESP_OK;
 }
 
-static esp_err_t write_config_mode(ina236_dev_t *dev, ina236_range_t range)
+static void profile_adc_timing(ina236_adc_profile_t profile, uint8_t *avg, uint8_t *vshct, uint8_t *vbusct)
 {
-    uint16_t cfg = 0;
-    esp_err_t err = reg_read_u16(dev, REG_CONFIG, &cfg);
-    if (err != ESP_OK) {
-        cfg = 0x4127;
+    if (profile == INA236_ADC_PROFILE_PRECISION) {
+        *avg    = 0x4u; /**< 128 次硬件平均 */
+        *vshct  = 0x4u; /**< 1100 µs 分流转换 */
+        *vbusct = 0x3u; /**< 588 µs 母线转换（功率/电压无需与分流同等精度） */
+        return;
     }
-    cfg &= ~(0x07u);
+
+    *avg    = 0x2u; /**< 16 次硬件平均 */
+    *vshct  = 0x3u; /**< 588 µs */
+    *vbusct = 0x3u;
+}
+
+static uint16_t build_config_word(ina236_range_t range, ina236_adc_profile_t profile)
+{
+    uint8_t avg = 0;
+    uint8_t vshct = 0;
+    uint8_t vbusct = 0;
+    profile_adc_timing(profile, &avg, &vshct, &vbusct);
+
+    uint16_t cfg = CONFIG_RESERVED_BITS;
+    cfg |= ((uint16_t)avg << CONFIG_AVG_SHIFT);
+    cfg |= ((uint16_t)vbusct << CONFIG_VBUSCT_SHIFT);
+    cfg |= ((uint16_t)vshct << CONFIG_VSHCT_SHIFT);
     cfg |= CONFIG_MODE_CONT_SHUNT_BUS;
     if (range == INA236_RANGE_FINE) {
         cfg |= (1u << CONFIG_ADCRANGE_SHIFT);
-    } else {
-        cfg &= ~(1u << CONFIG_ADCRANGE_SHIFT);
     }
+    return cfg;
+}
+
+static esp_err_t write_config_mode(ina236_dev_t *dev, ina236_range_t range)
+{
+    const uint16_t cfg = build_config_word(range, dev->adc_profile);
     return reg_write_u16(dev, REG_CONFIG, cfg);
 }
 
@@ -181,7 +220,7 @@ int16_t ina236_shunt_v_to_limit(ina236_range_t range, float shunt_v)
 
 esp_err_t ina236_init(ina236_dev_t *dev, i2c_port_t port, gpio_num_t alert_gpio,
                       const uint8_t *addr_candidates, size_t addr_count,
-                      float rshunt_ohm, float imax_a)
+                      float rshunt_ohm, float imax_a, ina236_adc_profile_t adc_profile)
 {
     if (!dev || !addr_candidates || addr_count == 0 || rshunt_ohm <= 0.0f || imax_a <= 0.0f) {
         return ESP_ERR_INVALID_ARG;
@@ -193,6 +232,7 @@ esp_err_t ina236_init(ina236_dev_t *dev, i2c_port_t port, gpio_num_t alert_gpio,
     dev->rshunt_ohm  = rshunt_ohm;
     dev->imax_a      = imax_a;
     dev->current_lsb = pick_current_lsb(imax_a);
+    dev->adc_profile = adc_profile;
 
     if (!i2c_bus_share_lock(pdMS_TO_TICKS(200))) {
         return ESP_ERR_TIMEOUT;
@@ -247,8 +287,10 @@ esp_err_t ina236_init(ina236_dev_t *dev, i2c_port_t port, gpio_num_t alert_gpio,
     }
 
     const float shunt_i_lsb = ina236_shunt_current_resolution_a(INA236_RANGE_FINE, rshunt_ohm);
-    ESP_LOGI(TAG, "INA236 @ 0x%02X, Rshunt=%.4g ohm, Imax=%.4g A, 分流分辨率=%.2g A, 起始量程=±20.48mV",
-             dev->i2c_addr, (double)rshunt_ohm, (double)imax_a, (double)shunt_i_lsb);
+    const char *profile_name = (adc_profile == INA236_ADC_PROFILE_PRECISION) ? "精测" : "快速";
+    ESP_LOGI(TAG,
+             "INA236 @ 0x%02X, Rshunt=%.4g ohm, Imax=%.4g A, 分流分辨率=%.2g A, 起始量程=±20.48mV, ADC=%s",
+             dev->i2c_addr, (double)rshunt_ohm, (double)imax_a, (double)shunt_i_lsb, profile_name);
     return ESP_OK;
 }
 

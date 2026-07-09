@@ -62,6 +62,12 @@ void power_meter_format_current(float current_a, char *buf, size_t buf_len);
 /** 格式化为 W 单位字符串（按量级 3~4 位小数，不切换 mW/uW）。 */
 void power_meter_format_power(float power_w, char *buf, size_t buf_len);
 
+/**
+ * 清除 NVS 中保存的零点校准表（大/微电流通路），并立即写回。
+ * 用于恢复出厂或重新建立电压-零点曲线。
+ */
+esp_err_t power_meter_clear_zero_cal_nvs(void);
+
 #ifdef __cplusplus
 }
 #endif

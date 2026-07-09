@@ -18,9 +18,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
 
 #include <math.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
 static const char *TAG = "power_meter";
@@ -50,6 +52,30 @@ static const char *TAG = "power_meter";
 /** 小→大升档后保持大电流通路最短时间 (ms)，避免芯片1 零点噪声立即降档 */
 #define PATH_HIGH_HOLD_MS  2000
 
+/** 微电流通路：空载校零（电压变化时暂停更新，避免把负载误判为零点） */
+#define ZERO_TRACK_THRESH_A       12.0e-6f
+#define ZERO_TRACK_DELTA_A        2.0e-6f
+#define ZERO_TRACK_STABLE_SAMPLES 4U
+#define ZERO_POINT_MERGE_V        0.15f
+#define ZERO_POINT_MIN_DV         0.20f
+#define ZERO_V_TRANSIENT_V        0.08f
+/** 学习到的 dI_zero/dV 限幅（含 MOS 漏电流等系统项，远大于 CMRR 理论值） */
+#define ZERO_SLOPE_MAX_LO_A_V     5.0e-6f
+#define ZERO_SLOPE_MAX_HI_A_V     2.0e-3f
+/** 每通路最多校零点数量（分段线性插值） */
+#define ZERO_CAL_MAX_POINTS       8U
+#define ZERO_CAL_NVS_MAGIC        0x504Du
+#define ZERO_CAL_NVS_VERSION      1U
+#define ZERO_CAL_NVS_NAMESPACE    "pm_cal"
+#define ZERO_CAL_NVS_KEY_HI       "zero_hi"
+#define ZERO_CAL_NVS_KEY_LO       "zero_lo"
+#define ZERO_CAL_NVS_DEBOUNCE_MS  5000U
+#define ZERO_CAL_IDLE_MERGE_ALPHA 0.12f
+
+/** 显示用 EMA：微电流更平滑，大电流更快响应 */
+#define FILTER_ALPHA_LO  0.35f
+#define FILTER_ALPHA_HI  0.55f
+
 static const uint8_t s_addr_hi[] = { INA236_ADDR_A0_GND_A, INA236_ADDR_A0_GND_B };
 static const uint8_t s_addr_lo[] = { INA236_ADDR_A0_VS_A, INA236_ADDR_A0_VS_B };
 
@@ -66,6 +92,34 @@ static TickType_t        s_path_cooldown_until;
 static TickType_t        s_path_settle_until;
 static TickType_t        s_high_path_hold_until;
 static volatile bool     s_path_switch_busy;
+
+/** 空载校零：多电压点分段线性插值 offset(V)，NVS 掉电保存。 */
+typedef struct {
+    float   v[ZERO_CAL_MAX_POINTS];
+    float   i[ZERO_CAL_MAX_POINTS];
+    uint8_t count;
+    float   v_prev;
+    bool    v_prev_valid;
+} zero_cal_t;
+
+typedef struct {
+    uint16_t magic;
+    uint8_t  version;
+    uint8_t  count;
+    float    v[ZERO_CAL_MAX_POINTS];
+    float    i[ZERO_CAL_MAX_POINTS];
+} zero_cal_nvs_blob_t;
+
+static zero_cal_t        s_zero_hi;
+static zero_cal_t        s_zero_lo;
+static float             s_i_filtered;
+static bool              s_i_filter_valid;
+static float             s_i_prev_raw;
+static uint8_t           s_zero_stable_cnt;
+static power_meter_path_t s_filter_path;
+static bool              s_nvs_ready;
+static bool              s_zero_cal_dirty;
+static TickType_t        s_zero_cal_save_at;
 
 static bool path_in_cooldown(void)
 {
@@ -106,6 +160,410 @@ static void clear_chip_alert_latch_locked(ina236_dev_t *dev)
 static ina236_dev_t *active_dev(void)
 {
     return (s_active_path == POWER_METER_PATH_HIGH) ? &s_ina_hi : &s_ina_lo;
+}
+
+static zero_cal_t *zero_cal_for_path(power_meter_path_t path)
+{
+    return (path == POWER_METER_PATH_LOW) ? &s_zero_lo : &s_zero_hi;
+}
+
+static float rshunt_for_path(power_meter_path_t path)
+{
+    return (path == POWER_METER_PATH_LOW) ? RSHUNT_LO_OHM : RSHUNT_HI_OHM;
+}
+
+static float zero_slope_max(power_meter_path_t path)
+{
+    return (path == POWER_METER_PATH_LOW) ? ZERO_SLOPE_MAX_LO_A_V : ZERO_SLOPE_MAX_HI_A_V;
+}
+
+static float zero_slope_default(power_meter_path_t path)
+{
+    return ina236_cmrr_zero_slope_a_per_v(INA236_CMRR_DB_MIN, rshunt_for_path(path));
+}
+
+static float clampf(float x, float lo, float hi)
+{
+    if (x < lo) {
+        return lo;
+    }
+    if (x > hi) {
+        return hi;
+    }
+    return x;
+}
+
+static void reset_zero_cal_runtime(zero_cal_t *zc)
+{
+    zc->v_prev       = 0.0f;
+    zc->v_prev_valid = false;
+}
+
+static void reset_current_filter(power_meter_path_t path)
+{
+    s_i_filter_valid  = false;
+    s_i_prev_raw      = 0.0f;
+    s_zero_stable_cnt = 0;
+    s_filter_path     = path;
+}
+
+static void zero_cal_sort_points(zero_cal_t *zc)
+{
+    for (uint8_t i = 1; i < zc->count; i++) {
+        const float tv = zc->v[i];
+        const float ti = zc->i[i];
+        int8_t j       = (int8_t)i - 1;
+        while (j >= 0 && zc->v[j] > tv) {
+            zc->v[j + 1] = zc->v[j];
+            zc->i[j + 1] = zc->i[j];
+            j--;
+        }
+        zc->v[j + 1] = tv;
+        zc->i[j + 1] = ti;
+    }
+}
+
+static int zero_cal_find_near(const zero_cal_t *zc, float bus_v)
+{
+    for (uint8_t idx = 0; idx < zc->count; idx++) {
+        if (fabsf(bus_v - zc->v[idx]) < ZERO_POINT_MERGE_V) {
+            return (int)idx;
+        }
+    }
+    return -1;
+}
+
+static float zero_segment_offset(float v0, float i0, float v1, float i1, float bus_v,
+                               power_meter_path_t path)
+{
+    const float dv = v1 - v0;
+    if (fabsf(dv) < 1e-6f) {
+        return i0;
+    }
+
+    float slope = (i1 - i0) / dv;
+    const float lim = zero_slope_max(path);
+    slope = clampf(slope, -lim, lim);
+    return i0 + slope * (bus_v - v0);
+}
+
+static float zero_offset_at_voltage(const zero_cal_t *zc, float bus_v, power_meter_path_t path)
+{
+    if (zc->count == 0) {
+        return 0.0f;
+    }
+    if (zc->count == 1) {
+        return zc->i[0] + zero_slope_default(path) * (bus_v - zc->v[0]);
+    }
+
+    if (bus_v <= zc->v[0]) {
+        return zero_segment_offset(zc->v[0], zc->i[0], zc->v[1], zc->i[1], bus_v, path);
+    }
+
+    const uint8_t last = (uint8_t)(zc->count - 1U);
+    if (bus_v >= zc->v[last]) {
+        return zero_segment_offset(zc->v[last - 1U], zc->i[last - 1U], zc->v[last], zc->i[last],
+                                   bus_v, path);
+    }
+
+    for (uint8_t k = 0; k + 1U < zc->count; k++) {
+        if (bus_v >= zc->v[k] && bus_v <= zc->v[k + 1U]) {
+            return zero_segment_offset(zc->v[k], zc->i[k], zc->v[k + 1U], zc->i[k + 1U], bus_v,
+                                       path);
+        }
+    }
+
+    return zc->i[last];
+}
+
+static void zero_cal_mark_dirty(void)
+{
+    s_zero_cal_dirty = true;
+    s_zero_cal_save_at = xTaskGetTickCount() + pdMS_TO_TICKS(ZERO_CAL_NVS_DEBOUNCE_MS);
+}
+
+static esp_err_t zero_cal_nvs_init_once(void)
+{
+    if (s_nvs_ready) {
+        return ESP_OK;
+    }
+
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_nvs_ready = true;
+    return ESP_OK;
+}
+
+static bool zero_cal_blob_valid(const zero_cal_nvs_blob_t *blob)
+{
+    if (!blob || blob->magic != ZERO_CAL_NVS_MAGIC || blob->version != ZERO_CAL_NVS_VERSION) {
+        return false;
+    }
+    if (blob->count == 0 || blob->count > ZERO_CAL_MAX_POINTS) {
+        return false;
+    }
+
+    for (uint8_t i = 0; i < blob->count; i++) {
+        if (!isfinite(blob->v[i]) || !isfinite(blob->i[i])) {
+            return false;
+        }
+        if (blob->v[i] < -0.5f || blob->v[i] > 52.0f) {
+            return false;
+        }
+        if (fabsf(blob->i[i]) > 0.05f) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void zero_cal_from_blob(zero_cal_t *zc, const zero_cal_nvs_blob_t *blob)
+{
+    memset(zc, 0, sizeof(*zc));
+    zc->count = blob->count;
+    memcpy(zc->v, blob->v, blob->count * sizeof(zc->v[0]));
+    memcpy(zc->i, blob->i, blob->count * sizeof(zc->i[0]));
+    zero_cal_sort_points(zc);
+}
+
+static void zero_cal_to_blob(const zero_cal_t *zc, zero_cal_nvs_blob_t *blob)
+{
+    memset(blob, 0, sizeof(*blob));
+    blob->magic   = ZERO_CAL_NVS_MAGIC;
+    blob->version = ZERO_CAL_NVS_VERSION;
+    blob->count   = zc->count;
+    memcpy(blob->v, zc->v, zc->count * sizeof(blob->v[0]));
+    memcpy(blob->i, zc->i, zc->count * sizeof(blob->i[0]));
+}
+
+static esp_err_t zero_cal_load_path(const char *key, zero_cal_t *zc)
+{
+    zero_cal_nvs_blob_t blob = {0};
+    size_t len               = sizeof(blob);
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(ZERO_CAL_NVS_NAMESPACE, NVS_READONLY, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_get_blob(h, key, &blob, &len);
+    nvs_close(h);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (len != sizeof(blob) || !zero_cal_blob_valid(&blob)) {
+        return ESP_ERR_INVALID_VERSION;
+    }
+
+    zero_cal_from_blob(zc, &blob);
+    return ESP_OK;
+}
+
+static esp_err_t zero_cal_save_path(const char *key, const zero_cal_t *zc)
+{
+    if (zc->count == 0) {
+        return ESP_OK;
+    }
+
+    zero_cal_nvs_blob_t blob = {0};
+    zero_cal_to_blob(zc, &blob);
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(ZERO_CAL_NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_blob(h, key, &blob, sizeof(blob));
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+    return err;
+}
+
+static void zero_cal_load_all(void)
+{
+    memset(&s_zero_hi, 0, sizeof(s_zero_hi));
+    memset(&s_zero_lo, 0, sizeof(s_zero_lo));
+
+    if (zero_cal_nvs_init_once() != ESP_OK) {
+        ESP_LOGW(TAG, "零点 NVS 初始化失败，使用空表");
+        return;
+    }
+
+    if (zero_cal_load_path(ZERO_CAL_NVS_KEY_HI, &s_zero_hi) == ESP_OK) {
+        ESP_LOGI(TAG, "已加载大电流零点表: %u 点", (unsigned)s_zero_hi.count);
+    }
+    if (zero_cal_load_path(ZERO_CAL_NVS_KEY_LO, &s_zero_lo) == ESP_OK) {
+        ESP_LOGI(TAG, "已加载微电流零点表: %u 点", (unsigned)s_zero_lo.count);
+    }
+}
+
+static void zero_cal_save_all(void)
+{
+    if (zero_cal_nvs_init_once() != ESP_OK) {
+        return;
+    }
+
+    esp_err_t err_hi = zero_cal_save_path(ZERO_CAL_NVS_KEY_HI, &s_zero_hi);
+    esp_err_t err_lo = zero_cal_save_path(ZERO_CAL_NVS_KEY_LO, &s_zero_lo);
+    if (err_hi == ESP_OK && err_lo == ESP_OK) {
+        ESP_LOGI(TAG, "零点表已保存 (大=%u 微=%u 点)", (unsigned)s_zero_hi.count,
+                 (unsigned)s_zero_lo.count);
+    } else {
+        ESP_LOGW(TAG, "零点表保存失败 hi=%s lo=%s", esp_err_to_name(err_hi),
+                 esp_err_to_name(err_lo));
+    }
+}
+
+static void zero_cal_nvs_poll(void)
+{
+    if (!s_zero_cal_dirty) {
+        return;
+    }
+    if ((int32_t)(xTaskGetTickCount() - s_zero_cal_save_at) < 0) {
+        return;
+    }
+
+    zero_cal_save_all();
+    s_zero_cal_dirty = false;
+}
+
+static void zero_cal_insert_point(zero_cal_t *zc, float bus_v, float raw_a)
+{
+    uint8_t pos = 0;
+    while (pos < zc->count && zc->v[pos] < bus_v) {
+        pos++;
+    }
+
+    if (zc->count < ZERO_CAL_MAX_POINTS) {
+        for (uint8_t j = zc->count; j > pos; j--) {
+            zc->v[j] = zc->v[j - 1U];
+            zc->i[j] = zc->i[j - 1U];
+        }
+        zc->v[pos]  = bus_v;
+        zc->i[pos]  = raw_a;
+        zc->count   = (uint8_t)(zc->count + 1U);
+        return;
+    }
+
+    uint8_t replace = 0;
+    float best_dist = fabsf(bus_v - zc->v[0]);
+    for (uint8_t k = 1; k < zc->count; k++) {
+        const float d = fabsf(bus_v - zc->v[k]);
+        if (d < best_dist) {
+            best_dist = d;
+            replace   = k;
+        }
+    }
+    zc->v[replace] = bus_v;
+    zc->i[replace] = raw_a;
+    zero_cal_sort_points(zc);
+}
+
+static void zero_cal_merge_idle_point(zero_cal_t *zc, float bus_v, float raw_a)
+{
+    bool changed = false;
+    const int near = zero_cal_find_near(zc, bus_v);
+
+    if (near >= 0) {
+        const float before = zc->i[near];
+        zc->i[near] += ZERO_CAL_IDLE_MERGE_ALPHA * (raw_a - zc->i[near]);
+        changed = fabsf(zc->i[near] - before) > ZERO_TRACK_DELTA_A * 0.1f;
+    } else if (zc->count == 0) {
+        zc->v[0]  = bus_v;
+        zc->i[0]  = raw_a;
+        zc->count = 1;
+        changed   = true;
+    } else if (zc->count == 1 && fabsf(bus_v - zc->v[0]) < ZERO_POINT_MIN_DV) {
+        const float before = zc->i[0];
+        zc->i[0] += ZERO_CAL_IDLE_MERGE_ALPHA * (raw_a - zc->i[0]);
+        changed = fabsf(zc->i[0] - before) > ZERO_TRACK_DELTA_A * 0.1f;
+    } else {
+        zero_cal_insert_point(zc, bus_v, raw_a);
+        changed = true;
+    }
+
+    if (changed) {
+        zero_cal_mark_dirty();
+    }
+}
+
+static bool bus_voltage_is_transient(zero_cal_t *zc, float bus_v)
+{
+    bool trans = false;
+    if (zc->v_prev_valid) {
+        trans = fabsf(bus_v - zc->v_prev) > ZERO_V_TRANSIENT_V;
+    }
+    zc->v_prev       = bus_v;
+    zc->v_prev_valid = true;
+    return trans;
+}
+
+static float filter_alpha_for_path(power_meter_path_t path)
+{
+    return (path == POWER_METER_PATH_LOW) ? FILTER_ALPHA_LO : FILTER_ALPHA_HI;
+}
+
+static float apply_zero_compensation(float raw_a, float bus_v, power_meter_path_t path)
+{
+    zero_cal_t *zc = zero_cal_for_path(path);
+
+    const float offset    = zero_offset_at_voltage(zc, bus_v, path);
+    const float corrected = raw_a - offset;
+    const bool  v_trans   = bus_voltage_is_transient(zc, bus_v);
+
+    if (!v_trans &&
+        fabsf(raw_a) < ZERO_TRACK_THRESH_A &&
+        fabsf(raw_a - s_i_prev_raw) < ZERO_TRACK_DELTA_A) {
+        if (s_zero_stable_cnt < UINT8_MAX) {
+            s_zero_stable_cnt++;
+        }
+    } else {
+        s_zero_stable_cnt = 0;
+    }
+
+    if (!v_trans && s_zero_stable_cnt >= ZERO_TRACK_STABLE_SAMPLES) {
+        zero_cal_merge_idle_point(zc, bus_v, raw_a);
+    }
+
+    s_i_prev_raw = raw_a;
+    return corrected;
+}
+
+static float apply_display_filter(float corrected_a, power_meter_path_t path)
+{
+    if (!s_i_filter_valid || s_filter_path != path) {
+        s_i_filtered     = corrected_a;
+        s_i_filter_valid = true;
+        s_filter_path    = path;
+        return corrected_a;
+    }
+
+    const float alpha = filter_alpha_for_path(path);
+    s_i_filtered = alpha * corrected_a + (1.0f - alpha) * s_i_filtered;
+    return s_i_filtered;
+}
+
+static float process_current_reading(float raw_a, float bus_v, power_meter_path_t path)
+{
+    const float corrected = apply_zero_compensation(raw_a, bus_v, path);
+    return apply_display_filter(corrected, path);
+}
+
+static float corrected_current_for_switch(const ina236_reading_t *raw, power_meter_path_t path)
+{
+    const zero_cal_t *zc = zero_cal_for_path(path);
+    return raw->current_a - zero_offset_at_voltage(zc, raw->bus_v, path);
 }
 
 static void mos_set_high_path(bool hi_path)
@@ -176,6 +634,8 @@ static esp_err_t switch_path(power_meter_path_t path, ina236_range_t start_range
     s_path_settle_until = xTaskGetTickCount() + pdMS_TO_TICKS(PATH_SETTLE_MS);
 
     mos_set_high_path(to_high);
+    reset_current_filter(path);
+    reset_zero_cal_runtime(zero_cal_for_path(path));
 
     if (to_high) {
         s_high_path_hold_until = xTaskGetTickCount() + pdMS_TO_TICKS(PATH_HIGH_HOLD_MS);
@@ -295,7 +755,7 @@ static void evaluate_path_switch(const ina236_reading_t *raw)
         return;
     }
 
-    const float abs_i = fabsf(raw->current_a);
+    const float abs_i = fabsf(corrected_current_for_switch(raw, s_active_path));
 
     if (s_active_path == POWER_METER_PATH_HIGH) {
         if (path_in_high_hold()) {
@@ -387,15 +847,19 @@ esp_err_t power_meter_init(i2c_port_t port)
     ESP_ERROR_CHECK(gpio_config(&mos_cfg));
     mos_set_high_path(true);
 
+    zero_cal_load_all();
+
     esp_err_t err = ina236_init(&s_ina_hi, port, POWER_METER_ALERT_HI_GPIO,
-                                s_addr_hi, sizeof(s_addr_hi), RSHUNT_HI_OHM, IMAX_HI_A);
+                                s_addr_hi, sizeof(s_addr_hi), RSHUNT_HI_OHM, IMAX_HI_A,
+                                INA236_ADC_PROFILE_FAST);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "芯片1 (大电流) 初始化失败: %s", esp_err_to_name(err));
         return err;
     }
 
     err = ina236_init(&s_ina_lo, port, POWER_METER_ALERT_LO_GPIO,
-                      s_addr_lo, sizeof(s_addr_lo), RSHUNT_LO_OHM, IMAX_LO_A);
+                      s_addr_lo, sizeof(s_addr_lo), RSHUNT_LO_OHM, IMAX_LO_A,
+                      INA236_ADC_PROFILE_PRECISION);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "芯片2 (微电流) 未就绪: %s，仅使用芯片1", esp_err_to_name(err));
         memset(&s_ina_lo, 0, sizeof(s_ina_lo));
@@ -416,15 +880,20 @@ esp_err_t power_meter_init(i2c_port_t port)
 
     const float hi_res = ina236_shunt_current_resolution_a(INA236_RANGE_COARSE, RSHUNT_HI_OHM);
     const float lo_res = ina236_shunt_current_resolution_a(INA236_RANGE_FINE, RSHUNT_LO_OHM);
-    const float lo_off = INA236_SHUNT_OFFSET_V_MAX / RSHUNT_LO_OHM;
+    const float lo_off_typ = INA236_SHUNT_OFFSET_V_TYP / RSHUNT_LO_OHM;
+    const float lo_off_max = INA236_SHUNT_OFFSET_V_MAX / RSHUNT_LO_OHM;
     ESP_LOGI(TAG,
              "功率计就绪 | MOS=GPIO%d 默认导通 | 芯片1 ALERT=GPIO%d | 芯片2 ALERT=GPIO%d",
              (int)POWER_METER_MOS_GPIO, (int)POWER_METER_ALERT_HI_GPIO,
              (int)POWER_METER_ALERT_LO_GPIO);
     ESP_LOGI(TAG,
-             "大电流: Rshunt=%.0f mΩ, 分辨率≈%.0f µA | 微电流: Rshunt=%.0f Ω, 分辨率≈%.1f nA, 零点≈±%.0f nA",
+             "大电流: Rshunt=%.0f mΩ, 分辨率≈%.0f µA, AVG=16 | "
+             "微电流: Rshunt=%.0f Ω, 分辨率≈%.1f nA, AVG=128, 芯片零点≈±%.0f nA (max ±%.0f nA)",
              (double)(RSHUNT_HI_OHM * 1000.0f), (double)(hi_res * 1e6f),
-             (double)RSHUNT_LO_OHM, (double)(lo_res * 1e9f), (double)(lo_off * 1e9f));
+             (double)RSHUNT_LO_OHM, (double)(lo_res * 1e9f),
+             (double)(lo_off_typ * 1e9f), (double)(lo_off_max * 1e9f));
+    ESP_LOGI(TAG, "零点校准: 每通路最多 %u 点, NVS 命名空间 \"%s\"",
+             (unsigned)ZERO_CAL_MAX_POINTS, ZERO_CAL_NVS_NAMESPACE);
     return ESP_OK;
 }
 
@@ -449,9 +918,11 @@ esp_err_t power_meter_read(power_meter_reading_t *out)
         return err;
     }
 
+    const float current_a = process_current_reading(raw.current_a, raw.bus_v, s_active_path);
+
     out->voltage_v  = raw.bus_v;
-    out->current_a  = raw.current_a;
-    out->power_w    = raw.power_w;
+    out->current_a  = current_a;
+    out->power_w    = current_a * raw.bus_v;
     out->range_fine = (raw.range == INA236_RANGE_FINE);
     out->overflow   = raw.overflow;
     out->path       = s_active_path;
@@ -463,6 +934,8 @@ esp_err_t power_meter_read(power_meter_reading_t *out)
         }
         evaluate_path_switch(&raw);
     }
+
+    zero_cal_nvs_poll();
 
     return ESP_OK;
 }
@@ -520,7 +993,7 @@ void power_meter_format_current(float current_a, char *buf, size_t buf_len)
     } else if (abs_a >= 0.001f) {
         (void)snprintf(buf, buf_len, "%.2f mA", (double)(current_a * 1000.0f));
     } else {
-        (void)snprintf(buf, buf_len, "%.1f uA", (double)(current_a * 1e6f));
+        (void)snprintf(buf, buf_len, "%.2f uA", (double)(current_a * 1e6f));
     }
 }
 
@@ -537,4 +1010,42 @@ void power_meter_format_power(float power_w, char *buf, size_t buf_len)
     } else {
         (void)snprintf(buf, buf_len, "%.4f W", (double)power_w);
     }
+}
+
+esp_err_t power_meter_clear_zero_cal_nvs(void)
+{
+    memset(&s_zero_hi, 0, sizeof(s_zero_hi));
+    memset(&s_zero_lo, 0, sizeof(s_zero_lo));
+    s_zero_cal_dirty = false;
+
+    if (zero_cal_nvs_init_once() != ESP_OK) {
+        return ESP_FAIL;
+    }
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(ZERO_CAL_NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    esp_err_t e1 = nvs_erase_key(h, ZERO_CAL_NVS_KEY_HI);
+    if (e1 == ESP_ERR_NVS_NOT_FOUND) {
+        e1 = ESP_OK;
+    }
+    esp_err_t e2 = nvs_erase_key(h, ZERO_CAL_NVS_KEY_LO);
+    if (e2 == ESP_ERR_NVS_NOT_FOUND) {
+        e2 = ESP_OK;
+    }
+    err = nvs_commit(h);
+    nvs_close(h);
+
+    if (e1 != ESP_OK) {
+        return e1;
+    }
+    if (e2 != ESP_OK) {
+        return e2;
+    }
+
+    ESP_LOGI(TAG, "NVS 零点校准表已清除");
+    return err;
 }
