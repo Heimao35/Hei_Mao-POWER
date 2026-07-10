@@ -15,6 +15,7 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -69,11 +70,12 @@ static const char *TAG = "power_meter";
 #define ZERO_CAL_NVS_NAMESPACE    "pm_cal"
 #define ZERO_CAL_NVS_KEY_HI       "zero_hi"
 #define ZERO_CAL_NVS_KEY_LO       "zero_lo"
-#define ZERO_CAL_NVS_DEBOUNCE_MS  5000U
+#define ZERO_CAL_NVS_DEBOUNCE_MS  1000U
+#define ZERO_CAL_BOOT_LEARN_MS    3000U
 #define ZERO_CAL_IDLE_MERGE_ALPHA 0.12f
 
-/** 显示用 EMA：微电流更平滑，大电流更快响应 */
-#define FILTER_ALPHA_LO  0.35f
+/** 显示用 EMA：微电流更快响应，大电流更平滑 */
+#define FILTER_ALPHA_LO  0.7f
 #define FILTER_ALPHA_HI  0.55f
 
 static const uint8_t s_addr_hi[] = { INA236_ADDR_A0_GND_A, INA236_ADDR_A0_GND_B };
@@ -102,7 +104,7 @@ typedef struct {
     bool    v_prev_valid;
 } zero_cal_t;
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint16_t magic;
     uint8_t  version;
     uint8_t  count;
@@ -120,6 +122,8 @@ static power_meter_path_t s_filter_path;
 static bool              s_nvs_ready;
 static bool              s_zero_cal_dirty;
 static TickType_t        s_zero_cal_save_at;
+static bool              s_zero_cal_loaded;
+static TickType_t        s_zero_learn_hold_until;
 
 static bool path_in_cooldown(void)
 {
@@ -276,10 +280,11 @@ static float zero_offset_at_voltage(const zero_cal_t *zc, float bus_v, power_met
     return zc->i[last];
 }
 
-static void zero_cal_mark_dirty(void)
+static void zero_cal_request_save(bool immediate)
 {
     s_zero_cal_dirty = true;
-    s_zero_cal_save_at = xTaskGetTickCount() + pdMS_TO_TICKS(ZERO_CAL_NVS_DEBOUNCE_MS);
+    s_zero_cal_save_at = xTaskGetTickCount() +
+                         (immediate ? 0 : pdMS_TO_TICKS(ZERO_CAL_NVS_DEBOUNCE_MS));
 }
 
 static esp_err_t zero_cal_nvs_init_once(void)
@@ -359,7 +364,14 @@ static esp_err_t zero_cal_load_path(const char *key, zero_cal_t *zc)
     if (err != ESP_OK) {
         return err;
     }
-    if (len != sizeof(blob) || !zero_cal_blob_valid(&blob)) {
+    if (len != sizeof(blob)) {
+        ESP_LOGW(TAG, "NVS 零点 blob 长度异常 key=%s len=%u 期望=%u",
+                 key, (unsigned)len, (unsigned)sizeof(blob));
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (!zero_cal_blob_valid(&blob)) {
+        ESP_LOGW(TAG, "NVS 零点 blob 校验失败 key=%s magic=0x%04X count=%u",
+                 key, (unsigned)blob.magic, (unsigned)blob.count);
         return ESP_ERR_INVALID_VERSION;
     }
 
@@ -394,17 +406,31 @@ static void zero_cal_load_all(void)
 {
     memset(&s_zero_hi, 0, sizeof(s_zero_hi));
     memset(&s_zero_lo, 0, sizeof(s_zero_lo));
+    s_zero_cal_loaded = false;
 
     if (zero_cal_nvs_init_once() != ESP_OK) {
         ESP_LOGW(TAG, "零点 NVS 初始化失败，使用空表");
         return;
     }
 
-    if (zero_cal_load_path(ZERO_CAL_NVS_KEY_HI, &s_zero_hi) == ESP_OK) {
+    esp_err_t err_hi = zero_cal_load_path(ZERO_CAL_NVS_KEY_HI, &s_zero_hi);
+    if (err_hi == ESP_OK) {
         ESP_LOGI(TAG, "已加载大电流零点表: %u 点", (unsigned)s_zero_hi.count);
+        s_zero_cal_loaded = true;
+    } else if (err_hi != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "加载大电流零点表失败: %s", esp_err_to_name(err_hi));
     }
-    if (zero_cal_load_path(ZERO_CAL_NVS_KEY_LO, &s_zero_lo) == ESP_OK) {
+
+    esp_err_t err_lo = zero_cal_load_path(ZERO_CAL_NVS_KEY_LO, &s_zero_lo);
+    if (err_lo == ESP_OK) {
         ESP_LOGI(TAG, "已加载微电流零点表: %u 点", (unsigned)s_zero_lo.count);
+        s_zero_cal_loaded = true;
+    } else if (err_lo != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "加载微电流零点表失败: %s", esp_err_to_name(err_lo));
+    }
+
+    if (s_zero_cal_loaded) {
+        s_zero_learn_hold_until = xTaskGetTickCount() + pdMS_TO_TICKS(ZERO_CAL_BOOT_LEARN_MS);
     }
 }
 
@@ -434,6 +460,15 @@ static void zero_cal_nvs_poll(void)
         return;
     }
 
+    zero_cal_save_all();
+    s_zero_cal_dirty = false;
+}
+
+static void zero_cal_shutdown_handler(void)
+{
+    if (!s_zero_cal_dirty) {
+        return;
+    }
     zero_cal_save_all();
     s_zero_cal_dirty = false;
 }
@@ -472,29 +507,33 @@ static void zero_cal_insert_point(zero_cal_t *zc, float bus_v, float raw_a)
 
 static void zero_cal_merge_idle_point(zero_cal_t *zc, float bus_v, float raw_a)
 {
-    bool changed = false;
-    const int near = zero_cal_find_near(zc, bus_v);
+    bool changed     = false;
+    bool new_point   = false;
+    const uint8_t before_count = zc->count;
+    const int near   = zero_cal_find_near(zc, bus_v);
 
     if (near >= 0) {
         const float before = zc->i[near];
         zc->i[near] += ZERO_CAL_IDLE_MERGE_ALPHA * (raw_a - zc->i[near]);
-        changed = fabsf(zc->i[near] - before) > ZERO_TRACK_DELTA_A * 0.1f;
+        changed = zc->i[near] != before;
     } else if (zc->count == 0) {
-        zc->v[0]  = bus_v;
-        zc->i[0]  = raw_a;
-        zc->count = 1;
-        changed   = true;
+        zc->v[0]    = bus_v;
+        zc->i[0]    = raw_a;
+        zc->count   = 1;
+        changed     = true;
+        new_point   = true;
     } else if (zc->count == 1 && fabsf(bus_v - zc->v[0]) < ZERO_POINT_MIN_DV) {
         const float before = zc->i[0];
         zc->i[0] += ZERO_CAL_IDLE_MERGE_ALPHA * (raw_a - zc->i[0]);
-        changed = fabsf(zc->i[0] - before) > ZERO_TRACK_DELTA_A * 0.1f;
+        changed = zc->i[0] != before;
     } else {
         zero_cal_insert_point(zc, bus_v, raw_a);
-        changed = true;
+        changed   = true;
+        new_point = (zc->count > before_count);
     }
 
     if (changed) {
-        zero_cal_mark_dirty();
+        zero_cal_request_save(new_point);
     }
 }
 
@@ -523,6 +562,7 @@ static float apply_zero_compensation(float raw_a, float bus_v, power_meter_path_
     const bool  v_trans   = bus_voltage_is_transient(zc, bus_v);
 
     if (!v_trans &&
+        (int32_t)(xTaskGetTickCount() - s_zero_learn_hold_until) >= 0 &&
         fabsf(raw_a) < ZERO_TRACK_THRESH_A &&
         fabsf(raw_a - s_i_prev_raw) < ZERO_TRACK_DELTA_A) {
         if (s_zero_stable_cnt < UINT8_MAX) {
@@ -894,6 +934,8 @@ esp_err_t power_meter_init(i2c_port_t port)
              (double)(lo_off_typ * 1e9f), (double)(lo_off_max * 1e9f));
     ESP_LOGI(TAG, "零点校准: 每通路最多 %u 点, NVS 命名空间 \"%s\"",
              (unsigned)ZERO_CAL_MAX_POINTS, ZERO_CAL_NVS_NAMESPACE);
+
+    esp_register_shutdown_handler(zero_cal_shutdown_handler);
     return ESP_OK;
 }
 
