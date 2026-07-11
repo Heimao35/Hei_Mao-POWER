@@ -31,20 +31,20 @@ static void menu_btn_cb(lv_event_t *e)
 }
 
 static lv_obj_t *create_menu_btn(lv_obj_t *parent, const char *label, ui_power_sheet_action_t action,
-                                 lv_coord_t w, btn_ud_t *ud)
+                                 lv_coord_t w, lv_coord_t h, btn_ud_t *ud)
 {
     lv_obj_t *btn = lv_btn_create(parent);
-    lv_obj_set_size(btn, w, 40);
-    lv_obj_set_style_radius(btn, 10, LV_PART_MAIN);
+    lv_obj_set_size(btn, w, h);
+    lv_obj_set_style_radius(btn, 12, LV_PART_MAIN);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x243b5c), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(btn, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(btn, 8, LV_PART_MAIN);
 
     lv_obj_t *lb = lv_label_create(btn);
     lv_label_set_text(lb, label);
     lv_obj_set_style_text_color(lb, lv_color_hex(0xF8FAFC), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lb, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(lb, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_center(lb);
 
     ud->action = action;
@@ -71,23 +71,29 @@ void ui_power_sheet_create(lv_obj_t *screen, ui_power_sheet_action_cb_t cb, void
     lv_obj_set_style_bg_opa(s_top_sheet, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_top_sheet, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(s_top_sheet, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_top_sheet, 10, LV_PART_MAIN);
-    lv_obj_set_flex_flow(s_top_sheet, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_top_sheet, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(s_top_sheet, 6, LV_PART_MAIN);
+    const lv_coord_t sheet_pad = 12;
+    const lv_coord_t grid_gap  = 10;
+
+    lv_obj_set_style_pad_all(s_top_sheet, sheet_pad, LV_PART_MAIN);
+    lv_obj_set_flex_flow(s_top_sheet, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(s_top_sheet, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s_top_sheet, grid_gap, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(s_top_sheet, grid_gap, LV_PART_MAIN);
     lv_obj_align(s_top_sheet, LV_ALIGN_TOP_MID, 0, -UI_POWER_TOP_SHEET_H);
     lv_obj_clear_flag(s_top_sheet, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    /* 460px 屏宽下 4 键均分，避免重叠 */
-    const lv_coord_t pad_h   = 20;
-    const lv_coord_t gap     = 6;
-    const lv_coord_t btn_w   = (w - pad_h - gap * 3) / 4;
+    /* 2×2 网格：按面板内宽/高均分两列两行 */
+    const lv_coord_t inner_w = w - sheet_pad * 2;
+    const lv_coord_t inner_h = UI_POWER_TOP_SHEET_H - sheet_pad * 2;
+    const lv_coord_t btn_w   = (inner_w - grid_gap) / 2;
+    const lv_coord_t btn_h   = (inner_h - grid_gap) / 2;
 
     static btn_ud_t uds[4];
-    create_menu_btn(s_top_sheet, "WIFI", UI_POWER_SHEET_WIFI, btn_w, &uds[0]);
-    create_menu_btn(s_top_sheet, "Bright", UI_POWER_SHEET_BRIGHTNESS, btn_w, &uds[1]);
-    create_menu_btn(s_top_sheet, "Volume", UI_POWER_SHEET_VOLUME, btn_w, &uds[2]);
-    create_menu_btn(s_top_sheet, "Zero", UI_POWER_SHEET_CALIBRATE, btn_w, &uds[3]);
+    create_menu_btn(s_top_sheet, "WIFI", UI_POWER_SHEET_WIFI, btn_w, btn_h, &uds[0]);
+    create_menu_btn(s_top_sheet, "Brightness", UI_POWER_SHEET_BRIGHTNESS, btn_w, btn_h, &uds[1]);
+    create_menu_btn(s_top_sheet, "Volume", UI_POWER_SHEET_VOLUME, btn_w, btn_h, &uds[2]);
+    create_menu_btn(s_top_sheet, "Zero", UI_POWER_SHEET_CALIBRATE, btn_w, btn_h, &uds[3]);
 
     /* 底部 PD 全屏面板 */
     s_bottom_sheet = lv_obj_create(screen);

@@ -32,8 +32,8 @@ extern "C" {
 /** 主方向滑动需超过副方向 * 此比例 / 100。 */
 #define UI_POWER_SWIPE_RATIO        120
 
-/** 顶部设置菜单展开高度 (px)。 */
-#define UI_POWER_TOP_SHEET_H        180
+/** 顶部设置菜单展开高度 (px)，2×2 按钮网格。 */
+#define UI_POWER_TOP_SHEET_H        200
 
 /** 顶部/底部面板背景色（与主界面 0x0f172a 区分）。 */
 #define UI_POWER_TOP_SHEET_BG       0x1a2d4d
