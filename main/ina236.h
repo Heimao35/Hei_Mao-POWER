@@ -49,7 +49,7 @@ typedef enum {
 
 /** ADC 转换时间与硬件平均策略（芯片后台连续平均，读寄存器不阻塞）。 */
 typedef enum {
-    INA236_ADC_PROFILE_FAST = 0,      /**< AVG=16, CT≈588 µs，适合大电流快速响应 */
+    INA236_ADC_PROFILE_FAST = 0,      /**< AVG=64, CT≈588 µs，大电流降噪与响应折中 */
     INA236_ADC_PROFILE_PRECISION,     /**< AVG=128, CT≈1100 µs，适合微电流降噪 */
 } ina236_adc_profile_t;
 

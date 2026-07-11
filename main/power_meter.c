@@ -46,7 +46,7 @@ static const char *TAG = "power_meter";
 #define PATH_UP_A    8.0e-4f
 #define PATH_DOWN_A  1.0e-3f
 /** 连续满足阈值的采样次数，抑制抖动 */
-#define PATH_SWITCH_STABLE_COUNT  3
+#define PATH_SWITCH_STABLE_COUNT  2
 /** MOS 切换后模拟稳定等待 (ms)，非阻塞计时 */
 #define PATH_SETTLE_MS             50U
 /** 微电流通路 AVG=128 需更长建立时间（与手动校零 settle 对齐） */
@@ -78,8 +78,8 @@ static const char *TAG = "power_meter";
 #define ZERO_CAL_MANUAL_INTERVAL_MS  120U
 
 /** 显示用 EMA：微电流更快响应，大电流更平滑 */
-#define FILTER_ALPHA_LO  0.7f
-#define FILTER_ALPHA_HI  0.55f
+#define FILTER_ALPHA_LO  0.9f
+#define FILTER_ALPHA_HI  0.2f
 
 static const uint8_t s_addr_hi[] = { INA236_ADDR_A0_GND_A, INA236_ADDR_A0_GND_B };
 static const uint8_t s_addr_lo[] = { INA236_ADDR_A0_VS_A, INA236_ADDR_A0_VS_B };
@@ -942,7 +942,7 @@ esp_err_t power_meter_init(i2c_port_t port)
              (int)POWER_METER_MOS_GPIO, (int)POWER_METER_ALERT_HI_GPIO,
              (int)POWER_METER_ALERT_LO_GPIO);
     ESP_LOGI(TAG,
-             "大电流: Rshunt=%.0f mΩ, 分辨率≈%.0f µA, AVG=16 | "
+             "大电流: Rshunt=%.0f mΩ, 分辨率≈%.0f µA, AVG=64 | "
              "微电流: Rshunt=%.0f Ω, 分辨率≈%.1f nA, AVG=128, 芯片零点≈±%.0f nA (max ±%.0f nA)",
              (double)(RSHUNT_HI_OHM * 1000.0f), (double)(hi_res * 1e6f),
              (double)RSHUNT_LO_OHM, (double)(lo_res * 1e9f),

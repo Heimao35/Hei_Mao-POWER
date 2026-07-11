@@ -176,7 +176,7 @@ static void profile_adc_timing(ina236_adc_profile_t profile, uint8_t *avg, uint8
         return;
     }
 
-    *avg    = 0x2u; /**< 16 次硬件平均 */
+    *avg    = 0x3u; /**< 64 次硬件平均 */
     *vshct  = 0x3u; /**< 588 µs */
     *vbusct = 0x3u;
 }

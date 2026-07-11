@@ -18,7 +18,7 @@
 #include "lvgl.h"
 #include <string.h>
 
-#define UI_POWER_REFRESH_MS 200
+#define UI_POWER_REFRESH_MS 100
 
 typedef struct {
     int pending;
