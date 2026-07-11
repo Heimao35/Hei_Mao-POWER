@@ -17,6 +17,7 @@ typedef enum {
     UI_POWER_SHEET_WIFI = 0,
     UI_POWER_SHEET_BRIGHTNESS,
     UI_POWER_SHEET_VOLUME,
+    UI_POWER_SHEET_CALIBRATE,
 } ui_power_sheet_action_t;
 
 typedef void (*ui_power_sheet_action_cb_t)(ui_power_sheet_action_t action, void *user_data);

@@ -37,6 +37,22 @@ static const buzzer_note_t s_boot_melody[] = {
     { 984, 140 }, /* 5 */
 };
 
+/*
+ * ========== 手动零点校准完成提示音（在此修改） ==========
+ * 两声短促鸣响，非阻塞播放。修改下方 freq_hz / duration_ms 即可自定义音调与节奏：
+ *
+ *   第 1 声：{ freq_hz, duration_ms }  — 第一声频率(Hz)与时长(ms)
+ *   休止  ：{ 0,       gap_ms      }  — 两声间隔(ms)，freq_hz=0 表示静音
+ *   第 2 声：{ freq_hz, duration_ms }  — 第二声频率(Hz)与时长(ms)
+ *
+ * 参考音高：C5=523  D5=587  E5=659  G5=784  A5=880
+ */
+static const buzzer_note_t s_zero_cal_melody[] = {
+    { 880, 55 }, /* 第 1 声 */
+    {   0, 35 }, /* 间隔 */
+    { 988, 55 }, /* 第 2 声 */
+};
+
 typedef enum {
     PLAY_MODE_IDLE = 0,
     PLAY_MODE_BEEP,
@@ -197,6 +213,13 @@ void buzzer_play_boot_melody(void)
     buzzer_play_melody(s_boot_melody,
                        sizeof(s_boot_melody) / sizeof(s_boot_melody[0]),
                        true);
+}
+
+void buzzer_play_zero_cal_done(void)
+{
+    buzzer_play_melody(s_zero_cal_melody,
+                       sizeof(s_zero_cal_melody) / sizeof(s_zero_cal_melody[0]),
+                       false);
 }
 
 esp_err_t buzzer_init(void)

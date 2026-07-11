@@ -13,6 +13,7 @@
 #include "ui_pd_panel.h"
 #include "pd_spoof.h"
 #include "buzzer.h"
+#include "power_meter.h"
 
 #include "lvgl.h"
 #include <string.h>
@@ -259,6 +260,34 @@ static void open_sub_page(ui_power_sub_page_t page)
     lv_obj_add_event_cb(p, sub_touch_cb, LV_EVENT_PRESS_LOST, NULL);
 }
 
+static void toggle_top_sheet(bool open);
+
+static void sheet_action_cb(ui_power_sheet_action_t action, void *user_data);
+
+typedef struct {
+    esp_err_t err;
+} zero_cal_async_t;
+
+static zero_cal_async_t s_zero_cal_async;
+
+static void zero_cal_ui_async(void *p)
+{
+    const zero_cal_async_t *msg = (const zero_cal_async_t *)p;
+    if (msg->err == ESP_OK) {
+        ui_pd_panel_show_message_toast("Zero calibrated");
+        buzzer_play_zero_cal_done();
+    } else {
+        ui_pd_panel_show_message_toast("Zero cal failed");
+    }
+}
+
+static void zero_cal_done_cb(esp_err_t err, void *user_data)
+{
+    (void)user_data;
+    s_zero_cal_async.err = err;
+    (void)lv_async_call(zero_cal_ui_async, &s_zero_cal_async);
+}
+
 static void sheet_action_cb(ui_power_sheet_action_t action, void *user_data)
 {
     (void)user_data;
@@ -271,6 +300,10 @@ static void sheet_action_cb(ui_power_sheet_action_t action, void *user_data)
         break;
     case UI_POWER_SHEET_VOLUME:
         open_sub_page(UI_POWER_SUB_VOLUME);
+        break;
+    case UI_POWER_SHEET_CALIBRATE:
+        toggle_top_sheet(false);
+        (void)power_meter_start_manual_zero_cal(zero_cal_done_cb, NULL);
         break;
     default:
         break;

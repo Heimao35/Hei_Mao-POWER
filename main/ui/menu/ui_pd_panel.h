@@ -23,6 +23,9 @@ void ui_pd_panel_sync_from_driver_ex(bool animate_switch);
 /** 显示物理按键触发的状态横幅（1 秒后自动收起）。 */
 void ui_pd_panel_show_toggle_toast(bool enabled);
 
+/** 显示与 PD 横幅相同样式的自定义消息（1 秒后自动收起）。 */
+void ui_pd_panel_show_message_toast(const char *message);
+
 #ifdef __cplusplus
 }
 #endif

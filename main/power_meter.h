@@ -68,6 +68,15 @@ void power_meter_format_power(float power_w, char *buf, size_t buf_len);
  */
 esp_err_t power_meter_clear_zero_cal_nvs(void);
 
+/** 手动零点校准完成回调（在后台任务上下文调用，UI 反馈须 lv_async_call 投递到 LVGL 线程）。 */
+typedef void (*power_meter_zero_cal_done_cb_t)(esp_err_t err, void *user_data);
+
+/**
+ * 启动手动零点校准（非阻塞）：对当前活动通路采样空载电流，按母线电压写入校零表并立即保存 NVS。
+ * 调用前请移除负载；若已有校准任务在运行则返回 ESP_ERR_INVALID_STATE。
+ */
+esp_err_t power_meter_start_manual_zero_cal(power_meter_zero_cal_done_cb_t cb, void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

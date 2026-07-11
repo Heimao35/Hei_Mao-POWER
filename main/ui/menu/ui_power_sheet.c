@@ -1,6 +1,6 @@
 /**
  * @file ui_power_sheet.c
- * @brief 顶部设置菜单（WIFI / Brightness / Volume）与底部 PD 全屏面板。
+ * @brief 顶部设置菜单（WIFI / Brightness / Volume / Zero）与底部 PD 全屏面板。
  */
 #include "ui_power_sheet.h"
 #include "ui_power_config.h"
@@ -30,25 +30,25 @@ static void menu_btn_cb(lv_event_t *e)
     s_action_cb(ud->action, s_action_ud);
 }
 
-static lv_obj_t *create_menu_btn(lv_obj_t *parent, const char *label, ui_power_sheet_action_t action)
+static lv_obj_t *create_menu_btn(lv_obj_t *parent, const char *label, ui_power_sheet_action_t action,
+                                 lv_coord_t w, btn_ud_t *ud)
 {
-    static btn_ud_t uds[3];
-
     lv_obj_t *btn = lv_btn_create(parent);
-    lv_obj_set_size(btn, 120, 44);
-    lv_obj_set_style_radius(btn, 12, LV_PART_MAIN);
+    lv_obj_set_size(btn, w, 40);
+    lv_obj_set_style_radius(btn, 10, LV_PART_MAIN);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x243b5c), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(btn, 4, LV_PART_MAIN);
 
     lv_obj_t *lb = lv_label_create(btn);
     lv_label_set_text(lb, label);
     lv_obj_set_style_text_color(lb, lv_color_hex(0xF8FAFC), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lb, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(lb, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_center(lb);
 
-    uds[action].action = action;
-    lv_obj_add_event_cb(btn, menu_btn_cb, LV_EVENT_CLICKED, &uds[action]);
+    ud->action = action;
+    lv_obj_add_event_cb(btn, menu_btn_cb, LV_EVENT_CLICKED, ud);
     return btn;
 }
 
@@ -71,16 +71,23 @@ void ui_power_sheet_create(lv_obj_t *screen, ui_power_sheet_action_cb_t cb, void
     lv_obj_set_style_bg_opa(s_top_sheet, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_top_sheet, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(s_top_sheet, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(s_top_sheet, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_top_sheet, 10, LV_PART_MAIN);
     lv_obj_set_flex_flow(s_top_sheet, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_top_sheet, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(s_top_sheet, 16, LV_PART_MAIN);
+    lv_obj_set_flex_align(s_top_sheet, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s_top_sheet, 6, LV_PART_MAIN);
     lv_obj_align(s_top_sheet, LV_ALIGN_TOP_MID, 0, -UI_POWER_TOP_SHEET_H);
     lv_obj_clear_flag(s_top_sheet, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
-    create_menu_btn(s_top_sheet, "WIFI", UI_POWER_SHEET_WIFI);
-    create_menu_btn(s_top_sheet, "Brightness", UI_POWER_SHEET_BRIGHTNESS);
-    create_menu_btn(s_top_sheet, "Volume", UI_POWER_SHEET_VOLUME);
+    /* 460px 屏宽下 4 键均分，避免重叠 */
+    const lv_coord_t pad_h   = 20;
+    const lv_coord_t gap     = 6;
+    const lv_coord_t btn_w   = (w - pad_h - gap * 3) / 4;
+
+    static btn_ud_t uds[4];
+    create_menu_btn(s_top_sheet, "WIFI", UI_POWER_SHEET_WIFI, btn_w, &uds[0]);
+    create_menu_btn(s_top_sheet, "Bright", UI_POWER_SHEET_BRIGHTNESS, btn_w, &uds[1]);
+    create_menu_btn(s_top_sheet, "Volume", UI_POWER_SHEET_VOLUME, btn_w, &uds[2]);
+    create_menu_btn(s_top_sheet, "Zero", UI_POWER_SHEET_CALIBRATE, btn_w, &uds[3]);
 
     /* 底部 PD 全屏面板 */
     s_bottom_sheet = lv_obj_create(screen);

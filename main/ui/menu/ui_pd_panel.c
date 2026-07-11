@@ -329,8 +329,12 @@ static void toast_hide_cb(lv_timer_t *t)
     toast_slide_out();
 }
 
-void ui_pd_panel_show_toggle_toast(bool enabled)
+static void toast_show_message(const char *message)
 {
+    if (!message) {
+        return;
+    }
+
     lv_obj_t *scr = lv_scr_act();
     if (!scr) {
         return;
@@ -361,7 +365,7 @@ void ui_pd_panel_show_toggle_toast(bool enabled)
 
     lv_obj_t *lb = (lv_obj_t *)lv_obj_get_user_data(s_toast);
     if (lb) {
-        lv_label_set_text(lb, enabled ? "PD enabled" : "PD disabled");
+        lv_label_set_text(lb, message);
     }
 
     lv_anim_del(s_toast, toast_anim_set_y);
@@ -384,6 +388,16 @@ void ui_pd_panel_show_toggle_toast(bool enabled)
     }
     s_toast_timer = lv_timer_create(toast_hide_cb, 1000, NULL);
     lv_timer_set_repeat_count(s_toast_timer, 1);
+}
+
+void ui_pd_panel_show_toggle_toast(bool enabled)
+{
+    toast_show_message(enabled ? "PD enabled" : "PD disabled");
+}
+
+void ui_pd_panel_show_message_toast(const char *message)
+{
+    toast_show_message(message);
 }
 
 void ui_pd_panel_refresh(void)

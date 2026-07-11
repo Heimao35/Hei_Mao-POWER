@@ -12,8 +12,8 @@
  */
 
 // ======================== USER CONFIG ========================
-#define WIFI_SSID       "A2-606"
-#define WIFI_PASS       "1742137034"
+#define WIFI_SSID       "CMCC-tianni-02"
+#define WIFI_PASS       "15159638506"
 
 #define MQTT_PORT       1883
 #define HTTP_PORT       80

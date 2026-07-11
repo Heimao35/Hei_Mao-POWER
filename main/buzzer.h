@@ -49,6 +49,9 @@ void buzzer_play_melody(const buzzer_note_t *notes, size_t count, bool force);
 /** 开机动画配套五音节提示音（定义见 buzzer.c 顶部 s_boot_melody）。 */
 void buzzer_play_boot_melody(void);
 
+/** 手动零点校准完成：两声快速提示音（音调/时长见 buzzer.c s_zero_cal_melody 注释）。 */
+void buzzer_play_zero_cal_done(void);
+
 void buzzer_stop(void);
 
 #ifdef __cplusplus
