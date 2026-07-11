@@ -48,7 +48,12 @@ static const char *TAG = "power_meter";
 /** 连续满足阈值的采样次数，抑制抖动 */
 #define PATH_SWITCH_STABLE_COUNT  3
 /** MOS 切换后模拟稳定等待 (ms)，非阻塞计时 */
-#define PATH_SETTLE_MS  50
+#define PATH_SETTLE_MS             50U
+/** 微电流通路 AVG=128 需更长建立时间（与手动校零 settle 对齐） */
+#define PATH_SETTLE_LO_MS          500U
+/** 通路稳定后用于 EMA 预热的采样次数（与手动校零多次平均同理） */
+#define PATH_WARMUP_SAMPLES_LO     6U
+#define PATH_WARMUP_SAMPLES_HI     3U
 /** 通路切换后禁止再次切换 (ms) */
 #define PATH_SWITCH_COOLDOWN_MS  1000
 /** 小→大升档后保持大电流通路最短时间 (ms)，避免芯片1 零点噪声立即降档 */
@@ -115,6 +120,9 @@ static zero_cal_t        s_zero_lo;
 static float             s_i_filtered;
 static bool              s_i_filter_valid;
 static power_meter_path_t s_filter_path;
+static uint8_t           s_filter_warmup_need;
+static uint8_t           s_filter_warmup_have;
+static float             s_filter_warmup_sum;
 static bool              s_nvs_ready;
 static bool              s_zero_cal_dirty;
 static TickType_t        s_zero_cal_save_at;
@@ -201,8 +209,32 @@ static void reset_zero_cal_runtime(zero_cal_t *zc)
 
 static void reset_current_filter(power_meter_path_t path)
 {
-    s_i_filter_valid = false;
-    s_filter_path    = path;
+    s_i_filter_valid       = false;
+    s_filter_path          = path;
+    s_filter_warmup_need   = 0;
+    s_filter_warmup_have   = 0;
+    s_filter_warmup_sum    = 0.0f;
+}
+
+static void begin_filter_warmup(power_meter_path_t path, uint8_t samples)
+{
+    s_filter_path        = path;
+    s_i_filter_valid     = false;
+    s_filter_warmup_need = samples;
+    s_filter_warmup_have = 0;
+    s_filter_warmup_sum  = 0.0f;
+}
+
+static void zero_cal_log_table(const char *name, const zero_cal_t *zc)
+{
+    if (!zc || zc->count == 0) {
+        ESP_LOGI(TAG, "%s: (空)", name);
+        return;
+    }
+    for (uint8_t i = 0; i < zc->count; i++) {
+        ESP_LOGI(TAG, "  %s[%u] V=%.3f I_zero=%.4e A", name, (unsigned)i,
+                 (double)zc->v[i], (double)zc->i[i]);
+    }
 }
 
 static void zero_cal_sort_points(zero_cal_t *zc)
@@ -393,6 +425,9 @@ static esp_err_t zero_cal_save_path(const char *key, const zero_cal_t *zc)
         err = nvs_commit(h);
     }
     nvs_close(h);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "NVS 已提交 key=%s count=%u", key, (unsigned)zc->count);
+    }
     return err;
 }
 
@@ -410,6 +445,7 @@ static void zero_cal_load_all(void)
     esp_err_t err_hi = zero_cal_load_path(ZERO_CAL_NVS_KEY_HI, &s_zero_hi);
     if (err_hi == ESP_OK) {
         ESP_LOGI(TAG, "已加载大电流零点表: %u 点", (unsigned)s_zero_hi.count);
+        zero_cal_log_table("zero_hi", &s_zero_hi);
         s_zero_cal_loaded = true;
     } else if (err_hi != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG, "加载大电流零点表失败: %s", esp_err_to_name(err_hi));
@@ -418,6 +454,7 @@ static void zero_cal_load_all(void)
     esp_err_t err_lo = zero_cal_load_path(ZERO_CAL_NVS_KEY_LO, &s_zero_lo);
     if (err_lo == ESP_OK) {
         ESP_LOGI(TAG, "已加载微电流零点表: %u 点", (unsigned)s_zero_lo.count);
+        zero_cal_log_table("zero_lo", &s_zero_lo);
         s_zero_cal_loaded = true;
     } else if (err_lo != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG, "加载微电流零点表失败: %s", esp_err_to_name(err_lo));
@@ -548,6 +585,29 @@ static float apply_display_filter(float corrected_a, power_meter_path_t path)
 static float process_current_reading(float raw_a, float bus_v, power_meter_path_t path)
 {
     const float corrected = apply_zero_compensation(raw_a, bus_v, path);
+
+    /* 通路/MOS 切换期间 INA236 未稳定，禁止污染 EMA 状态 */
+    if (path_is_settling()) {
+        s_i_filter_valid = false;
+        return corrected;
+    }
+
+    /* 稳定后先多次平均再锁定 EMA，避免重启/切通路后单点毛刺（0.3~0.4µA）拖偏显示 */
+    if (s_filter_warmup_need > 0) {
+        s_filter_warmup_sum += corrected;
+        s_filter_warmup_have++;
+        const float avg = s_filter_warmup_sum / (float)s_filter_warmup_have;
+        if (s_filter_warmup_have >= s_filter_warmup_need) {
+            s_i_filtered         = avg;
+            s_i_filter_valid     = true;
+            s_filter_path        = path;
+            s_filter_warmup_need = 0;
+            s_filter_warmup_have = 0;
+            return s_i_filtered;
+        }
+        return avg;
+    }
+
     return apply_display_filter(corrected, path);
 }
 
@@ -622,10 +682,12 @@ static esp_err_t switch_path(power_meter_path_t path, ina236_range_t start_range
     s_active_path       = path;
     s_path_stable_cnt   = 0;
     s_path_pending      = 0;
-    s_path_settle_until = xTaskGetTickCount() + pdMS_TO_TICKS(PATH_SETTLE_MS);
+    const uint32_t settle_ms = to_high ? PATH_SETTLE_MS : PATH_SETTLE_LO_MS;
+    s_path_settle_until = xTaskGetTickCount() + pdMS_TO_TICKS(settle_ms);
 
     mos_set_high_path(to_high);
     reset_current_filter(path);
+    begin_filter_warmup(path, to_high ? PATH_WARMUP_SAMPLES_HI : PATH_WARMUP_SAMPLES_LO);
     reset_zero_cal_runtime(zero_cal_for_path(path));
 
     if (to_high) {
@@ -869,6 +931,8 @@ esp_err_t power_meter_init(i2c_port_t port)
 
     s_inited = true;
 
+    begin_filter_warmup(POWER_METER_PATH_HIGH, PATH_WARMUP_SAMPLES_HI);
+
     const float hi_res = ina236_shunt_current_resolution_a(INA236_RANGE_COARSE, RSHUNT_HI_OHM);
     const float lo_res = ina236_shunt_current_resolution_a(INA236_RANGE_FINE, RSHUNT_LO_OHM);
     const float lo_off_typ = INA236_SHUNT_OFFSET_V_TYP / RSHUNT_LO_OHM;
@@ -954,6 +1018,10 @@ void power_meter_set_auto_range_enabled(bool enabled)
     if (!enabled || !s_inited) {
         return;
     }
+
+    begin_filter_warmup(s_active_path,
+                        s_active_path == POWER_METER_PATH_LOW ? PATH_WARMUP_SAMPLES_LO
+                                                              : PATH_WARMUP_SAMPLES_HI);
 
     if (i2c_bus_share_lock(pdMS_TO_TICKS(100))) {
         clear_chip_alert_latch(&s_ina_hi);
@@ -1048,12 +1116,15 @@ static void manual_zero_cal_task(void *arg)
     if (n_ok > 0) {
         zero_cal_t *zc = zero_cal_for_path(path);
         zero_cal_apply_manual_point(zc, sum_v / (float)n_ok, sum_i / (float)n_ok);
-        reset_current_filter(path);
+        begin_filter_warmup(path,
+                            path == POWER_METER_PATH_LOW ? PATH_WARMUP_SAMPLES_LO
+                                                           : PATH_WARMUP_SAMPLES_HI);
         reset_zero_cal_runtime(zc);
         result = ESP_OK;
-        ESP_LOGI(TAG, "手动零点校准完成 path=%d V=%.3f I=%.3e A (%u samples)",
+        ESP_LOGI(TAG, "手动零点校准完成 path=%d V=%.3f raw=%.4e A offset=%.4e A (%u samples)",
                  (int)path, (double)(sum_v / (float)n_ok), (double)(sum_i / (float)n_ok),
-                 (unsigned)n_ok);
+                 (double)zero_offset_at_voltage(zc, sum_v / (float)n_ok, path), (unsigned)n_ok);
+        zero_cal_log_table(path == POWER_METER_PATH_LOW ? "zero_lo(saved)" : "zero_hi(saved)", zc);
     } else {
         ESP_LOGW(TAG, "手动零点校准失败：采样无效");
     }
