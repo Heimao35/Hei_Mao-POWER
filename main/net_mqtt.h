@@ -20,7 +20,7 @@ extern "C" {
 
 /** MQTT Broker 地址，格式 mqtt://IP:端口（网关 ESP 的局域网 IP）。 */
 #ifndef NET_MQTT_BROKER_URI
-#define NET_MQTT_BROKER_URI "mqtt://192.168.10.107:1883"
+#define NET_MQTT_BROKER_URI "mqtt://这里填你的网关ip地址:1883"
 #endif
 
 /** 遥测上报间隔（毫秒）。 */
